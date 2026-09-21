@@ -1,0 +1,35 @@
+name: Windows build
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        shell: cmd
+        run: python -m pip install --upgrade pip && python -m pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Build executable
+        shell: cmd
+        run: build_windows.bat
+
+      - name: Upload executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: YaBizTracker-windows
+          path: dist/YaBizTracker.exe
+          if-no-files-found: error
