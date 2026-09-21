@@ -5,7 +5,7 @@ from zoneinfo import ZoneInfo
 from enum import Enum
 from PyQt6.QtCore import Qt, QTimer, QUrl, pyqtSignal
 from PyQt6.QtGui import QFont, QColor, QDesktopServices
-from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget, QDialog, QVBoxLayout, QHBoxLayout, QSplitter, QLabel, QPushButton, QTableWidget, QTableWidgetItem, QHeaderView, QLineEdit, QComboBox, QCheckBox, QProgressBar, QGroupBox, QMessageBox, QFileDialog, QDialogButtonBox, QPlainTextEdit, QSystemTrayIcon, QDateTimeEdit, QMenu, QInputDialog
+from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget, QDialog, QVBoxLayout, QHBoxLayout, QGridLayout, QSplitter, QLabel, QPushButton, QTableWidget, QTableWidgetItem, QHeaderView, QLineEdit, QComboBox, QCheckBox, QProgressBar, QGroupBox, QMessageBox, QFileDialog, QDialogButtonBox, QPlainTextEdit, QSystemTrayIcon, QDateTimeEdit, QMenu, QInputDialog, QSizePolicy
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtWebChannel import QWebChannel
 from PyQt6.QtWebEngineCore import QWebEngineSettings
@@ -117,13 +117,15 @@ class MainWindow(QMainWindow):
         left=QWidget();ll=QVBoxLayout(left)
         self.city_title=QLabel();self.city_title.setFont(QFont("Arial",15,QFont.Weight.Bold));ll.addWidget(self.city_title)
         top=QHBoxLayout();self.refresh_btn=QPushButton("🔄 Обновить сейчас");self.stop_btn=QPushButton("⏹ Остановить");self.settings_btn=QPushButton("⚙ Настройки");self.trash_btn=QPushButton("🗑 Корзина");self.refresh_btn.clicked.connect(lambda:self.run_scan(True));self.stop_btn.clicked.connect(self.stop_scan);self.settings_btn.clicked.connect(self.open_settings);self.trash_btn.clicked.connect(self.open_trash);top.addWidget(self.refresh_btn);top.addWidget(self.stop_btn);top.addWidget(self.settings_btn);top.addWidget(self.trash_btn);ll.addLayout(top)
-        filters=QGroupBox("Фильтры");fl=QHBoxLayout(filters)
+        filters=QGroupBox("Фильтры");fl=QGridLayout(filters);fl.setHorizontalSpacing(6);fl.setVerticalSpacing(6)
         self.search_edit=QLineEdit();self.search_edit.setPlaceholderText("🔎 Название, адрес или категория")
         self.cat_filter=QComboBox();self.cat_filter.addItem("Все категории","")
         self.status_filter=QComboBox();self.status_filter.addItem("Все статусы","");[self.status_filter.addItem(x,x) for x in STATUS_OPTIONS]
         self.settlement_filter=CheckableDropdown("Населённый пункт")
         self.phone_cb=PresenceFilterButton("Телефон");self.email_cb=PresenceFilterButton("E-mail");self.site_cb=PresenceFilterButton("Сайт");self.social_cb=PresenceFilterButton("Соцсети");self.responsible_cb=PresenceFilterButton("Ответственный");self.next_contact_cb=PresenceFilterButton("Следующий контакт")
-        for w in (self.search_edit,self.cat_filter,self.status_filter,self.settlement_filter,self.phone_cb,self.email_cb,self.site_cb,self.social_cb,self.responsible_cb,self.next_contact_cb):fl.addWidget(w)
+        presence_buttons=(self.phone_cb,self.email_cb,self.site_cb,self.social_cb,self.responsible_cb,self.next_contact_cb);[button.setMinimumWidth(128) or button.setSizePolicy(QSizePolicy.Policy.Expanding,QSizePolicy.Policy.Fixed) for button in presence_buttons]
+        fl.addWidget(self.search_edit,0,0,1,2);fl.addWidget(self.cat_filter,0,2);fl.addWidget(self.status_filter,1,0);fl.addWidget(self.settlement_filter,1,1,1,2);[(fl.addWidget(button,2+index//3,index%3)) for index,button in enumerate(presence_buttons)]
+        fl.setColumnStretch(0,1);fl.setColumnStretch(1,1);fl.setColumnStretch(2,1)
         ll.addWidget(filters)
         self.search_edit.textChanged.connect(self.apply_filters);self.cat_filter.currentIndexChanged.connect(self.apply_filters);self.status_filter.currentIndexChanged.connect(self.apply_filters);self.settlement_filter.changed.connect(self.apply_filters)
         for cb in (self.phone_cb,self.email_cb,self.site_cb,self.social_cb,self.responsible_cb,self.next_contact_cb):cb.clicked.connect(self.apply_filters)
@@ -464,7 +466,6 @@ class MainWindow(QMainWindow):
         if not organizations:
             QMessageBox.information(self, "Сбор E-mail", "В текущем списке нет организаций с указанным сайтом."); return
         self.start_email_finder(organizations=organizations, force=True); self.progress_label.setText(f"Ручной сбор E-mail: 0/{len(organizations)} организаций")
-
     def email_scan_progress(self,d):
         processed=int(d.get("processed",0)); queued=int(d.get("queued",0))
         if queued:
