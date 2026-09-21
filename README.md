@@ -9,7 +9,7 @@
 ![Окно настроек ч.1 / Setting's window part 1](docs/screenshots/settings-window-1.png)
 
 ### Окно настроек ч.2 / Setting's window part 2
-![Окно настроек ч.2 / Setting's window part 2](docs/screenshots/settings-window-2.png)
+![Окно настроек ч.2 / Setting's window part 2](docs/screenshots/settings-window-3.png)
 
 ## Русская версия
 
