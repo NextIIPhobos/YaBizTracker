@@ -6,10 +6,10 @@
 ![Главное окно / Main window](docs/screenshots/main-window.png)
 
 ### Окно настроек ч.1 / Setting's window part 1
-![Окно настроек ч.1 / Setting's window part 1](docs/screenshots/map-view.png)
+![Окно настроек ч.1 / Setting's window part 1](docs/screenshots/settings-window-1.png)
 
 ### Окно настроек ч.2 / Setting's window part 2
-![Окно настроек ч.2 / Setting's window part 2](docs/screenshots/excel-export.png)
+![Окно настроек ч.2 / Setting's window part 2](docs/screenshots/settings-window-2.png)
 
 ## Русская версия
 
