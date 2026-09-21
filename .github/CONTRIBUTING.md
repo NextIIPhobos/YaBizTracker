@@ -1,37 +1,69 @@
-# Contributing to YaBizTracker
+# Contributing
 
-Спасибо за интерес к проекту.
+## Русская версия
 
-## Перед изменением кода
+Спасибо за интерес к YaBizTracker.
 
-1. Создайте issue или убедитесь, что существующая issue описывает задачу.
-2. Создайте отдельную ветку от `main`.
-3. Не добавляйте API-ключи, базы данных, логи, резервные копии и пользовательские настройки.
+### Требования
 
-## Требования к изменениям
+- Python 3.10+.
+- Не добавляйте API-ключи, пароли, токены, локальные базы данных и пользовательские данные в репозиторий.
+- Изменения поведения должны сопровождаться тестами.
+- При изменении пользовательского поведения обновляйте README и связанную документацию.
 
-- Сохраняйте совместимость с Python 3.10+.
-- Новую бизнес-логику по возможности размещайте в `domain/` и покрывайте unit-тестами.
-- Не блокируйте GUI долгими сетевыми или файловыми операциями.
-- Не меняйте публичное поведение без описания в README/release notes.
-- Для исправлений добавляйте регрессионный тест.
+### Проверки перед Pull Request
 
-## Проверка перед Pull Request
-
-```text
-python -m compileall -q main.py yabiztracker tests
+```bash
 python -m pytest -q
+python -m compileall -q main.py yabiztracker tests
 ruff check main.py yabiztracker tests
 ```
 
-Для изменений Qt/WebEngine дополнительно выполните Windows smoke-test и проверьте запуск собранного EXE.
+Для изменений GUI дополнительно рекомендуется проверить приложение на Windows, включая EXE-сборку и WebEngine.
 
-## Pull Request
+### Pull Request
 
-В описании укажите:
+Опишите:
 
 - что изменено;
 - зачем это нужно;
-- как проверялось;
-- есть ли изменения БД/миграций;
-- есть ли изменения пользовательского интерфейса.
+- какие тесты выполнены;
+- есть ли изменения схемы SQLite или миграций;
+- затронута ли документация.
+
+Не добавляйте реальные API-ключи, базы с пользовательскими данными или другие секреты.
+
+---
+
+## English version
+
+Thank you for your interest in YaBizTracker.
+
+### Requirements
+
+- Python 3.10+.
+- Do not add API keys, passwords, tokens, local databases or user data to the repository.
+- Behavioral changes should be accompanied by tests.
+- Update the README and related documentation when user-facing behavior changes.
+
+### Checks before a Pull Request
+
+```bash
+python -m pytest -q
+python -m compileall -q main.py yabiztracker tests
+ruff check main.py yabiztracker tests
+```
+
+For GUI changes, Windows testing is additionally recommended, including the EXE build and WebEngine behavior.
+
+### Pull Request
+
+Describe:
+
+- what changed;
+- why the change is needed;
+- which tests were run;
+- whether SQLite schema or migrations changed;
+- whether documentation changed.
+
+Do not add real API keys, databases containing user data or other secrets.

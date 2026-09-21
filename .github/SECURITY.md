@@ -1,15 +1,47 @@
 # Security Policy
 
-## Reporting a vulnerability
+## Русская версия
 
-Не публикуйте API-ключи, токены, пароли, базы данных или иные секреты в публичных issues.
+### Поддерживаемые версии
 
-Если уязвимость может быть использована против пользователей, сначала сообщите её сопровождающему проекта через приватный канал GitHub, если он доступен. Если приватный канал недоступен, создайте issue без чувствительных деталей и укажите, что требуется приватный контакт.
+Публичные security fixes применяются к актуальной версии проекта и последнему опубликованному релизу, если иное не указано в release notes.
 
-## Поддерживаемая версия
+### Сообщение об уязвимости
 
-Поддерживается последняя опубликованная версия проекта.
+Не публикуйте потенциальные уязвимости в открытом GitHub Issue.
 
-## Данные пользователя
+Передайте описание проблемы владельцу репозитория через доступный приватный канал GitHub Security Advisories, если он включён для репозитория. Не отправляйте в сообщении API-ключи, пароли, session-файлы, персональные данные или базы данных.
 
-YaBizTracker рассчитан на локальную работу. Пользовательские API-ключи, настройки, SQLite-база, журналы и резервные копии не должны попадать в Git-репозиторий.
+В сообщении желательно указать:
+
+- затронутую версию;
+- шаги воспроизведения;
+- ожидаемое и фактическое поведение;
+- потенциальное влияние;
+- минимальный пример или безопасное доказательство концепции.
+
+После проверки проблема может быть исправлена в новом релизе.
+
+---
+
+## English version
+
+### Supported versions
+
+Security fixes apply to the current project version and the latest published release unless release notes state otherwise.
+
+### Reporting a vulnerability
+
+Do not disclose potential security vulnerabilities through a public GitHub Issue.
+
+Use a private GitHub Security Advisory channel if it is enabled for the repository. Do not include API keys, passwords, session files, personal data or databases in a report.
+
+A useful report should include:
+
+- affected version;
+- reproduction steps;
+- expected and actual behavior;
+- potential impact;
+- a minimal example or safe proof of concept.
+
+After validation, the issue may be fixed in a new release.

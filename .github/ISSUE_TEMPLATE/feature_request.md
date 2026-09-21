@@ -1,14 +1,36 @@
 ---
 name: Feature request
-about: Предложить улучшение
-title: "[Feature] "
-labels: enhancement
+about: Предложить улучшение YaBizTracker
 ---
 
-## Проблема
+# Предложение улучшения
 
-## Предлагаемое решение
+## Русская версия
 
-## Альтернативы
+### Проблема или задача
 
-## Дополнительный контекст
+Опишите, какую проблему должен решить новый функционал.
+
+### Предлагаемое решение
+
+Опишите желаемое поведение.
+
+### Дополнительный контекст
+
+Примеры использования, скриншоты или ограничения.
+
+---
+
+## English version
+
+### Problem or goal
+
+Describe the problem that the new functionality should solve.
+
+### Proposed solution
+
+Describe the desired behavior.
+
+### Additional context
+
+Usage examples, screenshots or constraints.

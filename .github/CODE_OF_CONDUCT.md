@@ -1,7 +1,31 @@
 # Code of Conduct
 
-Участники проекта должны поддерживать уважительную, профессиональную и конструктивную атмосферу.
+## Русская версия
 
-Не допускаются оскорбления, угрозы, дискриминация, травля, публикация чужих персональных данных и намеренное нарушение работы проекта.
+Участники проекта должны вести себя уважительно и профессионально.
 
-Нарушения можно сообщать сопровождающему проекта через GitHub.
+Недопустимы:
+
+- оскорбления и личные нападки;
+- дискриминационные высказывания;
+- угрозы и травля;
+- публикация чужих персональных данных;
+- намеренное нарушение работы проекта или обсуждений.
+
+Поддерживайте техническое обсуждение по существу и уважайте других участников.
+
+---
+
+## English version
+
+Project participants are expected to behave respectfully and professionally.
+
+The following are not acceptable:
+
+- insults and personal attacks;
+- discriminatory statements;
+- threats or harassment;
+- publishing other people's personal information;
+- intentionally disrupting the project or its discussions.
+
+Keep technical discussions constructive and respect other contributors.
