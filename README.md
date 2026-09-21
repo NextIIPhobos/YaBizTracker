@@ -1,5 +1,16 @@
 # YaBizTracker
 
+## 📸 Скриншоты / Screenshots
+
+### Главное окно / Main window
+![Главное окно / Main window](docs/screenshots/main-window.png)
+
+### Окно настроек ч.1 / Setting's window part 1
+![Окно настроек ч.1 / Setting's window part 1](docs/screenshots/map-view.png)
+
+### Окно настроек ч.2 / Setting's window part 2
+![Окно настроек ч.2 / Setting's window part 2](docs/screenshots/excel-export.png)
+
 ## Русская версия
 
 YaBizTracker — локальное Windows-приложение для поиска новых организаций и контактных данных через Yandex Maps API. Программа предназначена для маркетологов и специалистов по продажам: она сохраняет историю обнаружения организаций, отслеживает новые результаты, предоставляет фильтры и CRM-поля, показывает организации на карте и умеет собирать публичные e-mail с сайтов организаций.
