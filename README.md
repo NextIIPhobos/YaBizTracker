@@ -26,6 +26,8 @@ YaBizTracker — локальное Windows-приложение для поис
 - CRM-поля: статус, комментарий, ответственный и следующий контакт.
 - Фильтрация, сортировка, Shift-мультивыбор и массовое изменение CRM-полей.
 - Три состояния фильтров **Телефон, E-mail, Сайт, Соцсети, Ответственный, Следующий контакт**: первый клик показывает записи с заполненным значением, второй — без значения, третий отключает фильтр.
+- Кнопка **«Отображаемые столбцы»** над таблицей позволяет в любой момент включать и скрывать отдельные столбцы; по умолчанию все столбцы отображаются, а список чекбоксов остаётся открытым до клика вне его области.
+- Исправлен Shift-мультивыбор: диапазон корректно выделяется в обе стороны, сохраняет нижний anchor при выделении вверх и не падает на Windows.
 - Отдельная колонка **Населённый пункт** и фильтр в виде многовыборного checkbox-dropdown только по настроенным населённым пунктам.
 - Копирование e-mail и телефонов выбранных организаций в буфер обмена.
 - Отображение организаций на Yandex Maps.
@@ -267,6 +269,8 @@ The application is designed for a single user on a local computer. Core data is 
 - CRM fields: status, comment, responsible person and next contact date.
 - Filtering, sorting, Shift multi-selection and bulk CRM updates.
 - Three-state **Phone, E-mail, Website, Social networks, Responsible, Next contact** filters: the first click shows records with a value, the second shows records without a value, and the third disables the filter.
+- The **Displayed columns** button above the table lets the user show or hide individual columns at any time; all columns are visible by default, and the checkbox popup stays open until the user clicks outside it.
+- Fixed Shift multi-selection: ranges now work in both directions, preserve a lower anchor when selecting upward, and no longer crash on Windows.
 - Dedicated **Settlement** column and a multi-select checkbox dropdown containing only configured settlements.
 - Copy e-mails and phone numbers of selected organizations to the clipboard.
 - Display organizations on Yandex Maps.

@@ -5,7 +5,7 @@ from zoneinfo import ZoneInfo
 from enum import Enum
 from PyQt6.QtCore import Qt, QTimer, QUrl, pyqtSignal
 from PyQt6.QtGui import QFont, QColor, QDesktopServices
-from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget, QDialog, QVBoxLayout, QHBoxLayout, QGridLayout, QSplitter, QLabel, QPushButton, QTableWidget, QTableWidgetItem, QHeaderView, QLineEdit, QComboBox, QCheckBox, QProgressBar, QGroupBox, QMessageBox, QFileDialog, QDialogButtonBox, QPlainTextEdit, QSystemTrayIcon, QDateTimeEdit, QMenu, QInputDialog, QSizePolicy
+from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget, QDialog, QVBoxLayout, QHBoxLayout, QSplitter, QLabel, QPushButton, QTableWidget, QTableWidgetItem, QHeaderView, QLineEdit, QComboBox, QCheckBox, QProgressBar, QGroupBox, QMessageBox, QFileDialog, QDialogButtonBox, QPlainTextEdit, QSystemTrayIcon, QDateTimeEdit, QMenu, QInputDialog
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtWebChannel import QWebChannel
 from PyQt6.QtWebEngineCore import QWebEngineSettings
@@ -28,7 +28,7 @@ from ..logger import AppLogger
 from .. import __version__
 from .workers import HealthWorker
 from .email_worker import EmailFinderWorker
-from .widgets import OrganizationTableWidget, CheckableDropdown, PresenceFilterButton
+from .widgets import OrganizationTableWidget, CheckableDropdown, PresenceFilterButton, ColumnVisibilityPopup
 from .messenger_menu import build_messenger_menu
 from .dialogs import SettingsDialog, TrashDialog, ExportDialog
 from .delegates import NextContactItem, NextContactDelegate, StatusDelegate
@@ -117,21 +117,39 @@ class MainWindow(QMainWindow):
         left=QWidget();ll=QVBoxLayout(left)
         self.city_title=QLabel();self.city_title.setFont(QFont("Arial",15,QFont.Weight.Bold));ll.addWidget(self.city_title)
         top=QHBoxLayout();self.refresh_btn=QPushButton("🔄 Обновить сейчас");self.stop_btn=QPushButton("⏹ Остановить");self.settings_btn=QPushButton("⚙ Настройки");self.trash_btn=QPushButton("🗑 Корзина");self.refresh_btn.clicked.connect(lambda:self.run_scan(True));self.stop_btn.clicked.connect(self.stop_scan);self.settings_btn.clicked.connect(self.open_settings);self.trash_btn.clicked.connect(self.open_trash);top.addWidget(self.refresh_btn);top.addWidget(self.stop_btn);top.addWidget(self.settings_btn);top.addWidget(self.trash_btn);ll.addLayout(top)
-        filters=QGroupBox("Фильтры");fl=QGridLayout(filters);fl.setHorizontalSpacing(6);fl.setVerticalSpacing(6)
+        filters=QGroupBox("Фильтры");filter_layout=QVBoxLayout(filters)
+        filter_layout.setContentsMargins(6, 6, 6, 6);filter_layout.setSpacing(5)
         self.search_edit=QLineEdit();self.search_edit.setPlaceholderText("🔎 Название, адрес или категория")
         self.cat_filter=QComboBox();self.cat_filter.addItem("Все категории","")
         self.status_filter=QComboBox();self.status_filter.addItem("Все статусы","");[self.status_filter.addItem(x,x) for x in STATUS_OPTIONS]
         self.settlement_filter=CheckableDropdown("Населённый пункт")
         self.phone_cb=PresenceFilterButton("Телефон");self.email_cb=PresenceFilterButton("E-mail");self.site_cb=PresenceFilterButton("Сайт");self.social_cb=PresenceFilterButton("Соцсети");self.responsible_cb=PresenceFilterButton("Ответственный");self.next_contact_cb=PresenceFilterButton("Следующий контакт")
-        presence_buttons=(self.phone_cb,self.email_cb,self.site_cb,self.social_cb,self.responsible_cb,self.next_contact_cb);[button.setMinimumWidth(128) or button.setSizePolicy(QSizePolicy.Policy.Expanding,QSizePolicy.Policy.Fixed) for button in presence_buttons]
-        fl.addWidget(self.search_edit,0,0,1,2);fl.addWidget(self.cat_filter,0,2);fl.addWidget(self.status_filter,1,0);fl.addWidget(self.settlement_filter,1,1,1,2);[(fl.addWidget(button,2+index//3,index%3)) for index,button in enumerate(presence_buttons)]
-        fl.setColumnStretch(0,1);fl.setColumnStretch(1,1);fl.setColumnStretch(2,1)
+        filter_row_main=QHBoxLayout()
+        filter_row_main.setSpacing(5)
+        filter_row_main.addWidget(self.search_edit, 2)
+        filter_row_main.addWidget(self.cat_filter, 1)
+        filter_row_main.addWidget(self.status_filter, 1)
+        filter_row_main.addWidget(self.settlement_filter, 1)
+        filter_layout.addLayout(filter_row_main)
+        filter_row_presence_1=QHBoxLayout();filter_row_presence_1.setSpacing(5)
+        for widget in (self.phone_cb,self.email_cb,self.site_cb):
+            filter_row_presence_1.addWidget(widget, 1)
+        filter_layout.addLayout(filter_row_presence_1)
+        filter_row_presence_2=QHBoxLayout();filter_row_presence_2.setSpacing(5)
+        for widget in (self.social_cb,self.responsible_cb,self.next_contact_cb):
+            filter_row_presence_2.addWidget(widget, 1)
+        filter_layout.addLayout(filter_row_presence_2)
         ll.addWidget(filters)
         self.search_edit.textChanged.connect(self.apply_filters);self.cat_filter.currentIndexChanged.connect(self.apply_filters);self.status_filter.currentIndexChanged.connect(self.apply_filters);self.settlement_filter.changed.connect(self.apply_filters)
         for cb in (self.phone_cb,self.email_cb,self.site_cb,self.social_cb,self.responsible_cb,self.next_contact_cb):cb.clicked.connect(self.apply_filters)
         acts=QHBoxLayout();self.select_all_btn=QPushButton("☑ Выбрать все");self.copy_email_btn=QPushButton("✉ E-mail");self.copy_phone_btn=QPushButton("☎ Телефоны");self.delete_btn=QPushButton("🗑 Исключить");self.export_btn=QPushButton("📊 Excel");self.history_btn=QPushButton("📜 История")
         for b in (self.select_all_btn,self.copy_email_btn,self.copy_phone_btn,self.delete_btn,self.export_btn,self.history_btn):acts.addWidget(b)
         self.select_all_btn.clicked.connect(self.select_visible_all);self.copy_email_btn.clicked.connect(self.copy_emails);self.copy_phone_btn.clicked.connect(self.copy_phones);self.delete_btn.clicked.connect(self.delete_selected);self.export_btn.clicked.connect(self.export_excel);self.history_btn.clicked.connect(self.show_history);ll.addLayout(acts)
+        columns_row=QHBoxLayout();self.columns_btn=QPushButton("Отображаемые столбцы");self.columns_btn.setMinimumWidth(190)
+        self.columns_btn.setToolTip("Выберите столбцы, которые должны отображаться в списке организаций")
+        columns_row.addWidget(self.columns_btn, 0, Qt.AlignmentFlag.AlignLeft)
+        columns_row.addStretch(1)
+        ll.addLayout(columns_row)
         self._selection_action_buttons=(self.copy_email_btn,self.copy_phone_btn,self.delete_btn,self.history_btn)
         for b in self._selection_action_buttons:
             b.setEnabled(False)
@@ -142,6 +160,10 @@ class MainWindow(QMainWindow):
         self.org_table.setItemDelegateForColumn(OrgColumn.NEXT_CONTACT,NextContactDelegate(self.org_table))
         widths=[260,300,170,190,105,70,150,210,220,230,110,250,150,145,80]
         for i,w in enumerate(widths):self.org_table.setColumnWidth(i,w)
+        self._column_popup = None
+        self._column_checkboxes = {}
+        self._build_column_visibility_popup(headers)
+        self.columns_btn.clicked.connect(self._toggle_column_visibility_popup)
         ll.addWidget(self.org_table,1)
         left.setMinimumWidth(560)
         left.setMaximumWidth(1170)
@@ -466,6 +488,7 @@ class MainWindow(QMainWindow):
         if not organizations:
             QMessageBox.information(self, "Сбор E-mail", "В текущем списке нет организаций с указанным сайтом."); return
         self.start_email_finder(organizations=organizations, force=True); self.progress_label.setText(f"Ручной сбор E-mail: 0/{len(organizations)} организаций")
+
     def email_scan_progress(self,d):
         processed=int(d.get("processed",0)); queued=int(d.get("queued",0))
         if queued:
@@ -511,6 +534,33 @@ class MainWindow(QMainWindow):
         selected_cities=self.settlement_filter.checked_values()
         self.settlement_filter.set_items(configured_cities, selected_cities)
         self.load_table();self.update_dashboard();self.apply_map();self.update_usage_ui()
+    def _build_column_visibility_popup(self, headers):
+        self._column_popup = ColumnVisibilityPopup(headers, self)
+        self._column_checkboxes = self._column_popup._checkboxes
+        self._column_popup.visibility_changed.connect(
+            lambda column, visible: self.org_table.setColumnHidden(column, not visible)
+        )
+
+    def _toggle_column_visibility_popup(self):
+        if self._column_popup is None:
+            return
+        if self._column_popup.isVisible():
+            self._column_popup.hide()
+            return
+        self._column_popup.adjustSize()
+        pos = self.columns_btn.mapToGlobal(self.columns_btn.rect().bottomLeft())
+        screen = self.columns_btn.screen()
+        if screen:
+            available = screen.availableGeometry()
+            x = min(pos.x(), available.right() - self._column_popup.width())
+            y = min(pos.y(), available.bottom() - self._column_popup.height())
+            pos.setX(max(available.left(), x))
+            pos.setY(max(available.top(), y))
+        self._column_popup.move(pos)
+        self._column_popup.show()
+        self._column_popup.raise_()
+        self._column_popup.activateWindow()
+
     def load_table(self):
         cities=[c["name"] for c in self.settings.get("cities",[])]
         orgs=self.db.get_active_organizations(cities,self.settings.get("period_days",30));self._updating_table=True;self.org_table.setSortingEnabled(False);self.org_table.setRowCount(0)

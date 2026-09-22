@@ -41,3 +41,86 @@ class CheckableDropdownTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+@unittest.skipIf(QApplication is None, "PyQt6 is not installed in the audit environment")
+class ColumnVisibilityPopupTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.app = QApplication.instance() or QApplication([])
+
+    def test_all_columns_are_visible_by_default(self):
+        from yabiztracker.ui.widgets import ColumnVisibilityPopup
+        popup = ColumnVisibilityPopup(["Название", "E-mail", "Сайт"])
+        self.assertEqual(len(popup._checkboxes), 3)
+        self.assertTrue(all(popup.is_column_visible(c) for c in range(3)))
+
+    def test_checkbox_emits_visibility_change_and_stays_available(self):
+        from yabiztracker.ui.widgets import ColumnVisibilityPopup
+        popup = ColumnVisibilityPopup(["Название", "E-mail"])
+        changes = []
+        popup.visibility_changed.connect(lambda column, visible: changes.append((column, visible)))
+        popup.checkbox(1).setChecked(False)
+        self.assertFalse(popup.is_column_visible(1))
+        self.assertEqual(changes, [(1, False)])
+        self.assertTrue(popup.checkbox(0).isChecked())
+
+    def test_popup_uses_popup_window_flag_for_outside_click_close_behavior(self):
+        from PyQt6.QtCore import Qt
+        from yabiztracker.ui.widgets import ColumnVisibilityPopup
+        popup = ColumnVisibilityPopup(["Название"])
+        self.assertTrue(bool(popup.windowFlags() & Qt.WindowType.Popup))
+
+@unittest.skipIf(QApplication is None, "PyQt6 is not installed in the audit environment")
+class OrganizationSelectionTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.app = QApplication.instance() or QApplication([])
+
+    def _table(self):
+        from PyQt6.QtWidgets import QTableWidgetItem
+        from PyQt6.QtCore import Qt
+        from yabiztracker.ui.widgets import OrganizationTableWidget
+        table = OrganizationTableWidget(5, 2)
+        for row in range(5):
+            item = QTableWidgetItem(f"Org {row}")
+            item.setData(Qt.ItemDataRole.UserRole, f"id-{row}")
+            table.setItem(row, 0, item)
+            table.setItem(row, 1, QTableWidgetItem(str(row)))
+        table.show()
+        self.app.processEvents()
+        return table
+
+    def test_shift_range_keeps_lower_anchor_when_selecting_upward(self):
+        table = self._table()
+        table._selection_anchor_row = 4
+        table._selection_anchor_key = table._row_key(4)
+        table.select_visible_range(4, 1)
+        self.assertEqual([i.row() for i in table.selectionModel().selectedRows()], [1, 2, 3, 4])
+        self.assertEqual(table._find_anchor_row(), 4)
+
+    def test_shift_range_does_not_call_selection_model_index(self):
+        table = self._table()
+        table._selection_anchor_row = 3
+        table._selection_anchor_key = table._row_key(3)
+        table.select_visible_range(3, 0)
+        self.assertEqual([i.row() for i in table.selectionModel().selectedRows()], [0, 1, 2, 3])
+
+    def test_shift_range_keeps_lower_anchor_selected_after_event_loop_turn(self):
+        table = self._table()
+        table._selection_anchor_row = 4
+        table._selection_anchor_key = table._row_key(4)
+        table.select_visible_range(4, 1)
+        self.assertIn(4, [i.row() for i in table.selectionModel().selectedRows()])
+        self.app.processEvents()
+        selected = [i.row() for i in table.selectionModel().selectedRows()]
+        self.assertEqual(selected, [1, 2, 3, 4])
+        self.assertEqual(table._find_anchor_row(), 4)
+
+    def test_shift_range_excludes_hidden_rows(self):
+        table = self._table()
+        table.setRowHidden(2, True)
+        table._selection_anchor_row = 4
+        table._selection_anchor_key = table._row_key(4)
+        table.select_visible_range(4, 0)
+        self.assertEqual([i.row() for i in table.selectionModel().selectedRows()], [0, 1, 3, 4])
+        self.assertNotIn(2, [i.row() for i in table.selectionModel().selectedRows()])

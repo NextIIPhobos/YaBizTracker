@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt, pyqtSignal, QItemSelectionModel
+from PyQt6.QtCore import QItemSelectionModel, QTimer, Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QWidget, QHBoxLayout, QLineEdit, QLabel, QPushButton, QSizePolicy,
     QTableWidget, QFrame, QVBoxLayout, QCheckBox, QScrollArea,
@@ -169,6 +169,56 @@ class CheckableDropdown(QWidget):
         if self._popup is not None:
             self._popup.hide()
 
+
+
+class ColumnVisibilityPopup(QFrame):
+    """Popup containing one checkbox per table column.
+
+    ``QFrame.Popup`` gives the desired interaction contract: the popup remains
+    open while the user toggles checkboxes and closes automatically when the
+    user clicks outside its bounds.
+    """
+
+    visibility_changed = pyqtSignal(int, bool)
+
+    def __init__(self, headers, parent=None):
+        super().__init__(parent, Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint)
+        self.setFrameShape(QFrame.Shape.StyledPanel)
+        self.setObjectName("columnVisibilityPopup")
+        self.setMinimumWidth(280)
+        self._checkboxes: dict[int, QCheckBox] = {}
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(10, 10, 10, 10)
+        outer.setSpacing(5)
+        title = QLabel("Отображаемые столбцы")
+        title.setStyleSheet("font-weight: 600;")
+        outer.addWidget(title)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setMaximumHeight(430)
+        list_widget = QWidget()
+        list_layout = QVBoxLayout(list_widget)
+        list_layout.setContentsMargins(0, 0, 0, 0)
+        list_layout.setSpacing(2)
+
+        for column, header in enumerate(headers):
+            checkbox = QCheckBox(str(header))
+            checkbox.setChecked(True)
+            checkbox.toggled.connect(lambda checked, c=column: self.visibility_changed.emit(c, checked))
+            self._checkboxes[column] = checkbox
+            list_layout.addWidget(checkbox)
+
+        scroll.setWidget(list_widget)
+        outer.addWidget(scroll)
+
+    def checkbox(self, column: int):
+        return self._checkboxes[column]
+
+    def is_column_visible(self, column: int) -> bool:
+        return self._checkboxes[column].isChecked()
 
 
 class CityRow(QWidget):
@@ -344,6 +394,13 @@ class OrganizationTableWidget(QTableWidget):
             return
 
         model = self.selectionModel()
+        # Keep the anchor identity before touching Qt's selection model.
+        # QTableWidget can internally reconcile the current index after a
+        # selection change; on Windows that may drop the
+        # original anchor when the range is selected upward. The anchor is
+        # therefore restored explicitly both synchronously and on the next
+        # event-loop turn.
+        anchor_key = self._selection_anchor_key
         self._pruning_selection = True
         try:
             if not extend:
@@ -351,11 +408,43 @@ class OrganizationTableWidget(QTableWidget):
             flags = (QItemSelectionModel.SelectionFlag.Select |
                      QItemSelectionModel.SelectionFlag.Rows)
             for row in selected_rows:
-                model.select(model.index(row, 0), flags)
+                model.select(self.model().index(row, 0), flags)
+
+            resolved_anchor = self._find_anchor_row()
+            if resolved_anchor is not None and resolved_anchor in selected_rows:
+                model.select(self.model().index(resolved_anchor, 0), flags)
+
             self.setCurrentCell(target_row, 0, QItemSelectionModel.SelectionFlag.NoUpdate)
         finally:
             self._pruning_selection = False
         self.prune_hidden_selection()
+
+        # A second pass is intentional: QTableWidget may emit/update its
+        # selection state after this method returns from mousePressEvent.
+        # Re-apply only the anchor, never the whole range, so the user's
+        # existing selection semantics remain untouched.
+        if anchor_key is not None:
+            QTimer.singleShot(0, lambda key=anchor_key: self._restore_selection_anchor(key))
+
+    def _restore_selection_anchor(self, anchor_key):
+        if anchor_key is None or not self.selectionModel():
+            return
+        anchor_row = None
+        for row in range(self.rowCount()):
+            if self.isRowHidden(row):
+                continue
+            if self._row_key(row) == anchor_key:
+                anchor_row = row
+                break
+        if anchor_row is None:
+            return
+        flags = (QItemSelectionModel.SelectionFlag.Select |
+                 QItemSelectionModel.SelectionFlag.Rows)
+        self._pruning_selection = True
+        try:
+            self.selectionModel().select(self.model().index(anchor_row, 0), flags)
+        finally:
+            self._pruning_selection = False
 
     def select_visible_rows(self):
         if not self.selectionModel():
