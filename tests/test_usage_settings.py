@@ -13,6 +13,14 @@ class UsageSettingsTests(unittest.TestCase):
     def test_settings_backup_defaults(self):
         s=migrate_settings({}); self.assertTrue(s['backup']['enabled']); self.assertEqual(s['backup']['retention'],14); self.assertEqual(s['backup']['path'],'backups')
 
+    def test_column_visibility_defaults_to_all_and_keeps_explicit_empty_choice(self):
+        self.assertIsNone(migrate_settings({})["visible_organization_columns"])
+        self.assertEqual(migrate_settings({"visible_organization_columns": []})["visible_organization_columns"], [])
+        self.assertEqual(
+            migrate_settings({"visible_organization_columns": ["Название", "  ", 42]})["visible_organization_columns"],
+            ["Название", "42"],
+        )
+
 if __name__=='__main__': unittest.main()
 
 class SettingsHardeningTests(unittest.TestCase):

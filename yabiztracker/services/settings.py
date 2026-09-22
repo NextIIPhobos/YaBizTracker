@@ -11,7 +11,7 @@ DEFAULTS={"period_days":30,"schedule_hours":6,"api_limits":{"js":1000,"geocoder"
           "api_quota":{"start_date":None,"reset_frequency":"daily"},
           "cities":[],"categories":[],"excluded_categories":[],"profiles":{},"initial_scan_completed":False,
           "email_finder":{"enabled":True,"workers":8,"max_pages":5,"timeout_seconds":12,"max_response_bytes":2097152,"recheck_days":30,"respect_robots":True},
-          "backup":{"enabled":True,"retention":14,"path":"backups"},"settings_schema_version":SETTINGS_SCHEMA_VERSION}
+          "backup":{"enabled":True,"retention":14,"path":"backups"},"visible_organization_columns":None,"settings_schema_version":SETTINGS_SCHEMA_VERSION}
 def load_json(path, default=None):
     fallback = {} if default is None else copy.deepcopy(default)
     try:
@@ -96,6 +96,16 @@ def migrate_settings(s):
     try:s["backup"]["retention"]=max(1,min(365,int(s["backup"].get("retention",14))))
     except (TypeError,ValueError):s["backup"]["retention"]=14
     if not str(s["backup"].get("path") or "").strip():s["backup"]["path"]="backups"
+    # ``None`` means that this is an older configuration and all columns must
+    # be shown.  An empty list is a valid explicit user choice.
+    if s.get("visible_organization_columns") is not None:
+        if not isinstance(s["visible_organization_columns"], list):
+            s["visible_organization_columns"] = None
+        else:
+            s["visible_organization_columns"] = [
+                str(value).strip() for value in s["visible_organization_columns"]
+                if str(value).strip()
+            ]
     # The first launch date is stored once and becomes the default quota anchor.
     if not s["api_quota"].get("start_date"):
         s["api_quota"]["start_date"]=datetime.now(ZoneInfo("Europe/Moscow")).date().isoformat()

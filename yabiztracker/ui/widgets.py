@@ -351,8 +351,15 @@ class OrganizationTableWidget(QTableWidget):
             flags = (QItemSelectionModel.SelectionFlag.Select |
                      QItemSelectionModel.SelectionFlag.Rows)
             for row in selected_rows:
-                model.select(model.index(row, 0), flags)
-            self.setCurrentCell(target_row, 0, QItemSelectionModel.SelectionFlag.NoUpdate)
+                model.select(self.model().index(row, 0), flags)
+            # QTableWidget.setCurrentIndex() may apply its own selection
+            # command.  Setting the current model index without an update
+            # preserves the complete manually selected range, including an
+            # anchor below the Shift-clicked row.
+            model.setCurrentIndex(
+                self.model().index(target_row, 0),
+                QItemSelectionModel.SelectionFlag.NoUpdate,
+            )
         finally:
             self._pruning_selection = False
         self.prune_hidden_selection()

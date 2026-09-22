@@ -129,8 +129,8 @@ class MainWindow(QMainWindow):
         ll.addWidget(filters)
         self.search_edit.textChanged.connect(self.apply_filters);self.cat_filter.currentIndexChanged.connect(self.apply_filters);self.status_filter.currentIndexChanged.connect(self.apply_filters);self.settlement_filter.changed.connect(self.apply_filters)
         for cb in (self.phone_cb,self.email_cb,self.site_cb,self.social_cb,self.responsible_cb,self.next_contact_cb):cb.clicked.connect(self.apply_filters)
-        acts=QHBoxLayout();self.select_all_btn=QPushButton("☑ Выбрать все");self.copy_email_btn=QPushButton("✉ E-mail");self.copy_phone_btn=QPushButton("☎ Телефоны");self.delete_btn=QPushButton("🗑 Исключить");self.export_btn=QPushButton("📊 Excel");self.history_btn=QPushButton("📜 История")
-        for b in (self.select_all_btn,self.copy_email_btn,self.copy_phone_btn,self.delete_btn,self.export_btn,self.history_btn):acts.addWidget(b)
+        acts=QHBoxLayout();self.column_visibility=CheckableDropdown("Отображаемые столбцы");self.column_visibility.button.setMinimumWidth(225);self.select_all_btn=QPushButton("☑ Выбрать все");self.copy_email_btn=QPushButton("✉ E-mail");self.copy_phone_btn=QPushButton("☎ Телефоны");self.delete_btn=QPushButton("🗑 Исключить");self.export_btn=QPushButton("📊 Excel");self.history_btn=QPushButton("📜 История")
+        for b in (self.column_visibility,self.select_all_btn,self.copy_email_btn,self.copy_phone_btn,self.delete_btn,self.export_btn,self.history_btn):acts.addWidget(b)
         self.select_all_btn.clicked.connect(self.select_visible_all);self.copy_email_btn.clicked.connect(self.copy_emails);self.copy_phone_btn.clicked.connect(self.copy_phones);self.delete_btn.clicked.connect(self.delete_selected);self.export_btn.clicked.connect(self.export_excel);self.history_btn.clicked.connect(self.show_history);ll.addLayout(acts)
         self._selection_action_buttons=(self.copy_email_btn,self.copy_phone_btn,self.delete_btn,self.history_btn)
         for b in self._selection_action_buttons:
@@ -142,6 +142,12 @@ class MainWindow(QMainWindow):
         self.org_table.setItemDelegateForColumn(OrgColumn.NEXT_CONTACT,NextContactDelegate(self.org_table))
         widths=[260,300,170,190,105,70,150,210,220,230,110,250,150,145,80]
         for i,w in enumerate(widths):self.org_table.setColumnWidth(i,w)
+        visible_columns = self.settings.get("visible_organization_columns")
+        if visible_columns is None:
+            visible_columns = headers
+        self.column_visibility.set_items(headers, visible_columns)
+        self.column_visibility.changed.connect(self.set_visible_organization_columns)
+        self.set_visible_organization_columns(persist=False)
         ll.addWidget(self.org_table,1)
         left.setMinimumWidth(560)
         left.setMaximumWidth(1170)
@@ -167,6 +173,19 @@ class MainWindow(QMainWindow):
         self.statusBar().addPermanentWidget(self.icon_credit)
         self.stop_btn.setVisible(False)
         help_menu=self.menuBar().addMenu("Помощь");email_action=help_menu.addAction("Запустить сбор E-mail");email_action.triggered.connect(self.manual_email_scan);help_menu.addSeparator();diag=help_menu.addAction("Диагностика");diag.triggered.connect(self.show_diagnostics)
+    def set_visible_organization_columns(self, _checked=None, *, persist=True):
+        """Apply and persist the checked organization-table column names."""
+        visible = self.column_visibility.checked_values()
+        for column in range(self.org_table.columnCount()):
+            header = self.org_table.horizontalHeaderItem(column)
+            self.org_table.setColumnHidden(column, not header or header.text() not in visible)
+        if persist:
+            self.settings["visible_organization_columns"] = [
+                self.org_table.horizontalHeaderItem(column).text()
+                for column in range(self.org_table.columnCount())
+                if not self.org_table.isColumnHidden(column)
+            ]
+            save_json(os.path.join(self.base_dir, "settings.json"), self.settings)
     def _optimize_splitter_sizes(self):
         sp=getattr(self,"_main_splitter",None)
         if sp is None:return
