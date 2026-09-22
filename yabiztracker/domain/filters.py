@@ -5,7 +5,7 @@ from collections.abc import Mapping
 
 
 def normalize_category(value: object) -> str:
-    return str(value or "").strip().casefold()
+    return " ".join(str(value or "").replace("ё", "е").replace("Ё", "Е").split()).casefold()
 
 
 def organization_categories(org: Mapping) -> set[str]:

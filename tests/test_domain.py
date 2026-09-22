@@ -94,6 +94,29 @@ class ExclusionPrecedenceTests(unittest.TestCase):
         self.assertTrue(excluded_category_match(org,["Центр развития ребёнка"]))
 
 
+class CategoryExclusionNormalizationTests(unittest.TestCase):
+    def test_official_booking_categories_are_available(self):
+        from yabiztracker.domain.categories import YANDEX_ACTIVITIES
+        values={v for group in YANDEX_ACTIVITIES.values() for v in group.split("|")}
+        normalized={" ".join(v.replace("ё","е").replace("Ё","Е").split()).casefold() for v in values}
+        for expected in (
+            "Дополнительное образование",
+            "Центр развития ребёнка",
+            "Центр повышения квалификации",
+            "Курсы иностранных языков",
+            "Услуги репетиторов",
+            "Спортивно-развлекательный центр",
+        ):
+            self.assertIn(" ".join(expected.replace("ё","е").split()).casefold(), normalized)
+
+    def test_yo_and_e_are_treated_as_the_same_category(self):
+        org={"category":"Дополнительное образование","categories_json":"[\"Дополнительное образование\", \"Центр развития ребёнка\"]"}
+        self.assertTrue(excluded_category_match(org,["Центр развития ребенка"]))
+
+    def test_exclusion_matches_legacy_category_spelling(self):
+        org={"category":"Дополнительное образование","categories_json":"[\"Дополнительное образование\", \"Центр развития ребенка\"]"}
+        self.assertTrue(excluded_category_match(org,["Центр развития ребёнка"]))
+
 class PhoneLinkTests(unittest.TestCase):
     def test_russian_phone_formats_normalize_at_integration_boundary(self):
         from yabiztracker.domain.phone import normalize_ru_phone

@@ -61,8 +61,9 @@ def migrate_settings(s):
         s["cities"]=[s["city"]]
     s["categories"] = _normalise_category_list(s.get("categories", []))
     s["excluded_categories"] = _normalise_category_list(s.get("excluded_categories", []))
-    included = {normalize_category(value) for value in s["categories"]}
-    s["excluded_categories"] = [value for value in s["excluded_categories"] if normalize_category(value) not in included]
+    # Included and excluded categories are intentionally independent.
+    # Exclusion has precedence during search, so the same category may be
+    # present in both lists.
     if not s["api_limits"] or not isinstance(s["api_limits"],dict):s["api_limits"]=dict(DEFAULTS["api_limits"])
     for key, default in DEFAULTS["api_limits"].items():
         try:s["api_limits"][key]=max(0,int(s["api_limits"].get(key,default)))

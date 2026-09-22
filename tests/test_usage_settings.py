@@ -16,7 +16,7 @@ class UsageSettingsTests(unittest.TestCase):
 if __name__=='__main__': unittest.main()
 
 class SettingsHardeningTests(unittest.TestCase):
-    def test_settings_normalise_categories_and_remove_case_insensitive_overlap(self):
+    def test_settings_normalise_categories_and_preserve_exclusion_precedence(self):
         s=migrate_settings({
             "categories": [" Квесты ", "квесты", "Банк"],
             "excluded_categories": ["БАНК", " Спорт ", "спорт"],
@@ -25,11 +25,20 @@ class SettingsHardeningTests(unittest.TestCase):
             "api_limits": {"search": "bad", "js": -10},
         })
         self.assertEqual(s["categories"], ["Квесты", "Банк"])
-        self.assertEqual(s["excluded_categories"], ["Спорт"])
+        self.assertEqual(s["excluded_categories"], ["БАНК", "Спорт"])
         self.assertEqual(s["period_days"],30)
         self.assertEqual(s["schedule_hours"],6)
         self.assertEqual(s["api_limits"]["search"],1000)
         self.assertEqual(s["api_limits"]["js"],0)
+
+
+    def test_included_and_excluded_categories_may_overlap(self):
+        s=migrate_settings({
+            "categories": ["Дополнительное образование"],
+            "excluded_categories": ["Центр развития ребенка"],
+        })
+        self.assertEqual(s["categories"], ["Дополнительное образование"])
+        self.assertEqual(s["excluded_categories"], ["Центр развития ребенка"])
 
     def test_settings_missing_api_limit_keys_are_repaired(self):
         s=migrate_settings({"api_limits":{"search":42}})
