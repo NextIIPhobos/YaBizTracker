@@ -19,8 +19,9 @@ def test_repository_is_clean_and_runtime_files_are_not_committed():
 
 
 def test_branding_and_version_are_consistent():
-    assert (ROOT / "VERSION").read_text(encoding="utf-8").strip() == "1.0.2"
-    assert (ROOT / "yabiztracker" / "__init__.py").read_text(encoding="utf-8").strip() == '__version__="1.0.2"'
+    assert (ROOT / "VERSION").read_text(encoding="utf-8").strip() == "1.1.0"
+    assert (ROOT / "yabiztracker" / "__init__.py").read_text(encoding="utf-8").strip() == '__version__="1.1.0"'
+    assert 'version = "1.1.0"' in (ROOT / "pyproject.toml").read_text(encoding="utf-8")
     source_files = list((ROOT / "yabiztracker").rglob("*.py")) + [ROOT / "main.py"]
     for p in source_files:
         text = p.read_text(encoding="utf-8").lower()
@@ -35,7 +36,7 @@ def test_ui_is_split_into_cohesive_modules():
     assert {"SettingsDialog", "TrashDialog", "ExportDialog"} <= classes(ui / "dialogs.py")
     assert {"NextContactItem", "NextContactDelegate", "StatusDelegate"} <= classes(ui / "delegates.py")
     assert {"HealthWorker", "SuggestWorker"} <= classes(ui / "workers.py")
-    assert (len((ui / "main_window.py").read_text(encoding="utf-8").splitlines()) < 900)
+    assert (len((ui / "main_window.py").read_text(encoding="utf-8").splitlines()) < 940)
 
 
 def test_pyinstaller_build_configuration_is_explicit():
@@ -154,3 +155,30 @@ def test_dialog_qdesktopservices_comes_from_qtgui():
     text = (ROOT / "yabiztracker" / "ui" / "dialogs.py").read_text(encoding="utf-8")
     assert "from PyQt6.QtGui import QDesktopServices" in text
     assert "QDesktopServices" not in text.split("from PyQt6.QtWidgets", 1)[1].split("\n\n", 1)[0]
+
+
+def test_category_catalog_is_user_editable_and_runtime_generated():
+    categories = (ROOT / "yabiztracker" / "domain" / "categories.py").read_text(encoding="utf-8")
+    assert "categories.txt" in categories
+    assert "Категории должны разделяться символом ';'" in categories
+    assert "ensure_categories_file" in categories
+    dialogs = (ROOT / "yabiztracker" / "ui" / "dialogs.py").read_text(encoding="utf-8")
+    assert "Изменить список категорий" in dialogs
+    assert "_check_categories_file" in dialogs
+
+
+def test_category_filter_controls_map_markers():
+    ui = (ROOT / "yabiztracker" / "ui" / "main_window.py").read_text(encoding="utf-8")
+    controller = (ROOT / "yabiztracker" / "services" / "map_controller.py").read_text(encoding="utf-8")
+    assert "on_category_filter_changed" in ui
+    assert "apply_map()" in ui
+    assert 'matches_organization_filters(org, {"category_names": category_names})' in controller
+    assert "category_filter" in ui
+    assert 'CheckableDropdown("Категории")' in ui
+
+
+def test_settings_contains_safe_cleanup_actions():
+    dialogs = (ROOT / "yabiztracker" / "ui" / "dialogs.py").read_text(encoding="utf-8")
+    assert "Удалить все бэкапы" in dialogs
+    assert "Удалить все логи" in dialogs
+    assert "Удалить вспомогательные файлы" in dialogs

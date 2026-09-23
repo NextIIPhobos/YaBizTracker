@@ -5,7 +5,7 @@ from zoneinfo import ZoneInfo
 from enum import Enum
 from PyQt6.QtCore import Qt, QTimer, QUrl, pyqtSignal
 from PyQt6.QtGui import QFont, QColor, QDesktopServices
-from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget, QDialog, QVBoxLayout, QHBoxLayout, QSplitter, QLabel, QPushButton, QTableWidget, QTableWidgetItem, QHeaderView, QLineEdit, QComboBox, QCheckBox, QProgressBar, QGroupBox, QMessageBox, QFileDialog, QDialogButtonBox, QPlainTextEdit, QSystemTrayIcon, QDateTimeEdit, QMenu, QInputDialog
+from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget, QDialog, QVBoxLayout, QHBoxLayout, QGridLayout, QSplitter, QLabel, QPushButton, QTableWidget, QTableWidgetItem, QHeaderView, QLineEdit, QComboBox, QCheckBox, QProgressBar, QGroupBox, QMessageBox, QFileDialog, QDialogButtonBox, QPlainTextEdit, QSystemTrayIcon, QDateTimeEdit, QMenu, QInputDialog, QSizePolicy
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtWebChannel import QWebChannel
 from PyQt6.QtWebEngineCore import QWebEngineSettings
@@ -15,7 +15,8 @@ from ..api.errors import ApiLimitError, ApiAuthError
 from ..bridge import MapBridge
 from ..database import Database
 from ..domain.models import STATUS_OPTIONS
-from ..domain.filters import matches_organization_filters
+from ..domain.filters import matches_organization_filters, organization_categories
+from ..domain.categories import ensure_categories_file
 from ..domain.schedule import next_wall_clock_occurrence
 from ..domain.table import OrgColumn
 from ..services.api_usage import ApiUsageService
@@ -42,7 +43,7 @@ class AppState(Enum):
 class MainWindow(QMainWindow):
     scan_requested=pyqtSignal()
     def __init__(self,base_dir):
-        super().__init__();self.base_dir=base_dir
+        super().__init__();self.base_dir=base_dir;ensure_categories_file(base_dir)
         self.config=load_json(os.path.join(base_dir,"config.json"))
         self.settings=migrate_settings(load_json(os.path.join(base_dir,"settings.json")))
         quota_settings=self.settings.get("api_quota",{})
@@ -53,7 +54,7 @@ class MainWindow(QMainWindow):
         self.logger=AppLogger(base_dir);self.backup_service=self._build_backup_service();self.bridge=MapBridge();self.scan_worker=None;self.email_worker=None;self.health_worker=None;self.scheduler=None;self.map_ready=False;self.state=AppState.INITIALIZING;self._updating_table=False;self.last_run_usage=None
         self._selection_map_timer=QTimer(self);self._selection_map_timer.setSingleShot(True);self._selection_map_timer.timeout.connect(self.update_map_for_selection)
         self.quota_timer=QTimer(self);self.quota_timer.setSingleShot(True);self.trash_cleanup_timer=QTimer(self);self.trash_cleanup_timer.setInterval(60*60*1000);self.trash_cleanup_timer.timeout.connect(self.cleanup_trash);self.trash_cleanup_timer.start()
-        self.setWindowTitle("YaBizTracker — мониторинг новых организаций");self.setWindowIcon(QApplication.instance().windowIcon());self.resize(1880,980);self.setMinimumSize(1180,700)
+        self.setWindowTitle("YaBizTracker — мониторинг новых организаций");self.setWindowIcon(QApplication.instance().windowIcon());self.resize(1880,980);self.setMinimumSize(1200,700)
         # ВАЖНО: UI строится до подключения сигналов/инициализации компонентов,
         # которые могут сразу сгенерировать лог. Иначе on_log_message() может
         # обратиться к log_text до его создания и завершить запуск приложения.
@@ -120,14 +121,14 @@ class MainWindow(QMainWindow):
         filters=QGroupBox("Фильтры");filter_layout=QVBoxLayout(filters)
         filter_layout.setContentsMargins(6, 6, 6, 6);filter_layout.setSpacing(5)
         self.search_edit=QLineEdit();self.search_edit.setPlaceholderText("🔎 Название, адрес или категория")
-        self.cat_filter=QComboBox();self.cat_filter.addItem("Все категории","")
+        self.category_filter=CheckableDropdown("Категории")
         self.status_filter=QComboBox();self.status_filter.addItem("Все статусы","");[self.status_filter.addItem(x,x) for x in STATUS_OPTIONS]
         self.settlement_filter=CheckableDropdown("Населённый пункт")
         self.phone_cb=PresenceFilterButton("Телефон");self.email_cb=PresenceFilterButton("E-mail");self.site_cb=PresenceFilterButton("Сайт");self.social_cb=PresenceFilterButton("Соцсети");self.responsible_cb=PresenceFilterButton("Ответственный");self.next_contact_cb=PresenceFilterButton("Следующий контакт")
         filter_row_main=QHBoxLayout()
         filter_row_main.setSpacing(5)
         filter_row_main.addWidget(self.search_edit, 2)
-        filter_row_main.addWidget(self.cat_filter, 1)
+        filter_row_main.addWidget(self.category_filter, 1)
         filter_row_main.addWidget(self.status_filter, 1)
         filter_row_main.addWidget(self.settlement_filter, 1)
         filter_layout.addLayout(filter_row_main)
@@ -140,10 +141,11 @@ class MainWindow(QMainWindow):
             filter_row_presence_2.addWidget(widget, 1)
         filter_layout.addLayout(filter_row_presence_2)
         ll.addWidget(filters)
-        self.search_edit.textChanged.connect(self.apply_filters);self.cat_filter.currentIndexChanged.connect(self.apply_filters);self.status_filter.currentIndexChanged.connect(self.apply_filters);self.settlement_filter.changed.connect(self.apply_filters)
+        self.search_edit.textChanged.connect(self.apply_filters);self.category_filter.changed.connect(self.on_category_filter_changed);self.status_filter.currentIndexChanged.connect(self.apply_filters);self.settlement_filter.changed.connect(self.apply_filters)
         for cb in (self.phone_cb,self.email_cb,self.site_cb,self.social_cb,self.responsible_cb,self.next_contact_cb):cb.clicked.connect(self.apply_filters)
-        acts=QHBoxLayout();self.select_all_btn=QPushButton("☑ Выбрать все");self.copy_email_btn=QPushButton("✉ E-mail");self.copy_phone_btn=QPushButton("☎ Телефоны");self.delete_btn=QPushButton("🗑 Исключить");self.export_btn=QPushButton("📊 Excel");self.history_btn=QPushButton("📜 История")
-        for b in (self.select_all_btn,self.copy_email_btn,self.copy_phone_btn,self.delete_btn,self.export_btn,self.history_btn):acts.addWidget(b)
+        acts=QGridLayout();acts.setHorizontalSpacing(5);acts.setVerticalSpacing(5)
+        self.select_all_btn=QPushButton("☑ Выбрать все");self.copy_email_btn=QPushButton("✉ E-mail");self.copy_phone_btn=QPushButton("☎ Телефоны");self.delete_btn=QPushButton("🗑 Исключить");self.export_btn=QPushButton("📊 Excel");self.history_btn=QPushButton("📜 История")
+        for i,b in enumerate((self.select_all_btn,self.copy_email_btn,self.copy_phone_btn,self.delete_btn,self.export_btn,self.history_btn)): b.setSizePolicy(QSizePolicy.Policy.Expanding,QSizePolicy.Policy.Fixed);acts.addWidget(b,i//3,i%3)
         self.select_all_btn.clicked.connect(self.select_visible_all);self.copy_email_btn.clicked.connect(self.copy_emails);self.copy_phone_btn.clicked.connect(self.copy_phones);self.delete_btn.clicked.connect(self.delete_selected);self.export_btn.clicked.connect(self.export_excel);self.history_btn.clicked.connect(self.show_history);ll.addLayout(acts)
         columns_row=QHBoxLayout();self.columns_btn=QPushButton("Отображаемые столбцы");self.columns_btn.setMinimumWidth(190)
         self.columns_btn.setToolTip("Выберите столбцы, которые должны отображаться в списке организаций")
@@ -156,7 +158,7 @@ class MainWindow(QMainWindow):
             b.setToolTip("Выберите хотя бы одну организацию в списке.")
         self.selection_label=QLabel("Выбрано: 0");ll.addWidget(self.selection_label)
         headers=["Название","Адрес","Населённый пункт","Категория","Дата появления","Возраст","Телефон","E-mail","Сайт","Соцсети","Статус","Комментарий","Ответственный","Следующий контакт","Lead Score"]
-        self.org_table=OrganizationTableWidget(0,len(headers));self.org_table.setHorizontalHeaderLabels(headers);self.org_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows);self.org_table.setSelectionMode(QTableWidget.SelectionMode.ExtendedSelection);self.org_table.setSortingEnabled(True);self.org_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive);self.org_table.itemSelectionChanged.connect(self.selection_changed);self.org_table.delete_requested.connect(self.delete_selected);self.org_table.itemChanged.connect(self.crm_changed);self.org_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu);self.org_table.customContextMenuRequested.connect(self.show_org_context_menu);self.org_table.setItemDelegateForColumn(OrgColumn.STATUS,StatusDelegate(self.org_table))
+        self.org_table=OrganizationTableWidget(0,len(headers));self.org_table.setHorizontalHeaderLabels(headers);self.org_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows);self.org_table.setSelectionMode(QTableWidget.SelectionMode.ExtendedSelection);self.org_table.setSortingEnabled(True);self.org_table.setMinimumSize(0,0);self.org_table.setSizePolicy(QSizePolicy.Policy.Expanding,QSizePolicy.Policy.Expanding);self.org_table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded);self.org_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive);self.org_table.horizontalHeader().setMinimumSectionSize(45);self.org_table.itemSelectionChanged.connect(self.selection_changed);self.org_table.delete_requested.connect(self.delete_selected);self.org_table.itemChanged.connect(self.crm_changed);self.org_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu);self.org_table.customContextMenuRequested.connect(self.show_org_context_menu);self.org_table.setItemDelegateForColumn(OrgColumn.STATUS,StatusDelegate(self.org_table))
         self.org_table.setItemDelegateForColumn(OrgColumn.NEXT_CONTACT,NextContactDelegate(self.org_table))
         widths=[260,300,170,190,105,70,150,210,220,230,110,250,150,145,80]
         for i,w in enumerate(widths):self.org_table.setColumnWidth(i,w)
@@ -165,12 +167,12 @@ class MainWindow(QMainWindow):
         self._build_column_visibility_popup(headers)
         self.columns_btn.clicked.connect(self._toggle_column_visibility_popup)
         ll.addWidget(self.org_table,1)
-        left.setMinimumWidth(560)
+        left.setMinimumWidth(440)
         left.setMaximumWidth(1170)
         self.last_scan_label=QLabel();self.last_scan_label.setStyleSheet("color:#666");ll.addWidget(self.last_scan_label)
         sp.addWidget(left)
-        center=QWidget();center.setMinimumWidth(680);cl=QVBoxLayout(center);self.map_title=QLabel();self.map_title.setAlignment(Qt.AlignmentFlag.AlignCenter);cl.addWidget(self.map_title);self.map=QWebEngineView();self.map_controller=MapController(self.map,self._map_is_ready,self.settings,self.db,OrgColumn);s=self.map.settings();s.setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls,True);s.setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessFileUrls,True);cl.addWidget(self.map,1);sp.addWidget(center)
-        right=QWidget();right.setMinimumWidth(280);right.setMaximumWidth(360);rl2=QVBoxLayout(right);dash=QGroupBox("📊 Dashboard");dl=QVBoxLayout(dash);self.dashboard_label=QLabel();self.dashboard_label.setWordWrap(True);dl.addWidget(self.dashboard_label);rl2.addWidget(dash)
+        center=QWidget();center.setMinimumWidth(460);center.setSizePolicy(QSizePolicy.Policy.Expanding,QSizePolicy.Policy.Expanding);cl=QVBoxLayout(center);self.map_title=QLabel();self.map_title.setAlignment(Qt.AlignmentFlag.AlignCenter);cl.addWidget(self.map_title);self.map=QWebEngineView();self.map_controller=MapController(self.map,self._map_is_ready,self.settings,self.db,OrgColumn);s=self.map.settings();s.setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls,True);s.setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessFileUrls,True);cl.addWidget(self.map,1);sp.addWidget(center)
+        right=QWidget();right.setMinimumWidth(250);right.setMaximumWidth(360);right.setSizePolicy(QSizePolicy.Policy.Preferred,QSizePolicy.Policy.Expanding);rl2=QVBoxLayout(right);dash=QGroupBox("📊 Dashboard");dl=QVBoxLayout(dash);self.dashboard_label=QLabel();self.dashboard_label.setWordWrap(True);dl.addWidget(self.dashboard_label);rl2.addWidget(dash)
         prog=QGroupBox("Сканирование");pl=QVBoxLayout(prog);self.progress_label=QLabel("Ожидание");self.progress=QProgressBar();self.progress.setRange(0,100);self.progress.setValue(0);self.quality=QLabel();self.quality.setWordWrap(True);pl.addWidget(self.progress_label);pl.addWidget(self.progress);pl.addWidget(self.quality);rl2.addWidget(prog)
         api=QGroupBox("API / локальное использование");al=QVBoxLayout(api);self.api_status_labels={}
         for key,name in [("js","JavaScript API"),("geocoder","Геокодер API"),("search","Search API")]:
@@ -193,8 +195,11 @@ class MainWindow(QMainWindow):
         sp=getattr(self,"_main_splitter",None)
         if sp is None:return
         w=max(0,sp.width())
-        left,right=(960,320) if w>=1750 else ((900,300) if w>=1450 else (840,280))
-        center=max(680,w-left-right)
+        if w>=1750:left,right=900,320
+        elif w>=1450:left,right=700,300
+        else:left,right=440,250
+        center=max(460,w-left-right);total=left+center+right;deficit=max(0,total-w)
+        shrink=min(deficit,max(0,center-460));center-=shrink;deficit-=shrink;shrink=min(deficit,max(0,left-440));left-=shrink;deficit-=shrink;right=max(250,right-deficit)
         sp.setSizes([left,center,right])
     def resizeEvent(self,event):
         super().resizeEvent(event)
@@ -268,10 +273,10 @@ class MainWindow(QMainWindow):
             if it and it.data(Qt.ItemDataRole.UserRole)==oid:
                 self.org_table.clearSelection();self.org_table.selectRow(r);self.org_table.scrollToItem(it);return
     def on_map_ready(self):
-        self.map_ready=True;self.api_status_labels["js"].setText("☑ JavaScript API — OK");self.map_controller.apply_state()
+        self.map_ready=True;self.api_status_labels["js"].setText("☑ JavaScript API — OK");self.map_controller.apply_state(self.category_filter.checked_values() if hasattr(self, 'category_filter') else set())
     def apply_map(self):
         if not self.map_ready:return
-        cities=self.settings.get("cities",[]);self.map_title.setText("🗺️ Карта — "+", ".join(c.get("name","") for c in cities));self.map_controller.apply_state()
+        cities=self.settings.get("cities",[]);self.map_title.setText("🗺️ Карта — "+", ".join(c.get("name","") for c in cities));self.map_controller.apply_state(self.category_filter.checked_values() if hasattr(self, 'category_filter') else set())
     def update_map_for_selection(self):
         self.map_controller.fit_after_selection_change(self.org_table)
     def run_health(self):
@@ -424,7 +429,6 @@ class MainWindow(QMainWindow):
         if self.scan_worker and self.scan_worker.isRunning():self.set_state(AppState.STOPPING);self.scan_worker.requestInterruption();self.progress_label.setText("Остановка…")
     def scan_progress(self,d):
         total=max(1,len(self.settings["cities"])*len(self.settings["categories"]));done=(d["category_index"]-1)/total
-        # Current category is deliberately weighted lightly; page progress is informative, not fake precision.
         pct=int(min(99,(done+0.5/total)*100));self.progress.setValue(pct);self.progress_label.setText(f"{d['city']} → {d['category']} | страница {d['page']} | API-результатов: {d['api_results']} | обработано страниц: {d['pages']}")
     def scan_completed(self,st):
         self.usage.flush();after=self.usage.snapshot();before=getattr(self,"_usage_before",after)
@@ -488,7 +492,6 @@ class MainWindow(QMainWindow):
         if not organizations:
             QMessageBox.information(self, "Сбор E-mail", "В текущем списке нет организаций с указанным сайтом."); return
         self.start_email_finder(organizations=organizations, force=True); self.progress_label.setText(f"Ручной сбор E-mail: 0/{len(organizations)} организаций")
-
     def email_scan_progress(self,d):
         processed=int(d.get("processed",0)); queued=int(d.get("queued",0))
         if queued:
@@ -530,9 +533,14 @@ class MainWindow(QMainWindow):
     def refresh_all(self):
         configured_cities=[c.get("name","").strip() for c in self.settings.get("cities",[]) if c.get("name","").strip()]
         self.city_title.setText("📋 Организации — "+", ".join(configured_cities) if configured_cities else "📋 Организации")
-        self.cat_filter.blockSignals(True);cur=self.cat_filter.currentData();self.cat_filter.clear();self.cat_filter.addItem("Все категории","");cats=sorted({o.get("category","") for o in self.db.get_active_organizations(configured_cities,self.settings.get("period_days",30)) if o.get("category")});[self.cat_filter.addItem(c,c) for c in cats];self.cat_filter.setCurrentIndex(max(0,self.cat_filter.findData(cur)));self.cat_filter.blockSignals(False)
-        selected_cities=self.settlement_filter.checked_values()
-        self.settlement_filter.set_items(configured_cities, selected_cities)
+        orgs = self.db.get_active_organizations(configured_cities, self.settings.get("period_days", 30))
+        cats = sorted({value for org in orgs for value in organization_categories(org)}, key=str.casefold)
+        selected_categories = self.category_filter.checked_values()
+        category_selection = selected_categories if self.category_filter._items else None
+        self.category_filter.set_items(cats, category_selection)
+        selected_cities = self.settlement_filter.checked_values()
+        city_selection = selected_cities if self.settlement_filter._items else None
+        self.settlement_filter.set_items(configured_cities, city_selection)
         self.load_table();self.update_dashboard();self.apply_map();self.update_usage_ui()
     def _build_column_visibility_popup(self, headers):
         self._column_popup = ColumnVisibilityPopup(headers, self)
@@ -540,7 +548,6 @@ class MainWindow(QMainWindow):
         self._column_popup.visibility_changed.connect(
             lambda column, visible: self.org_table.setColumnHidden(column, not visible)
         )
-
     def _toggle_column_visibility_popup(self):
         if self._column_popup is None:
             return
@@ -560,7 +567,6 @@ class MainWindow(QMainWindow):
         self._column_popup.show()
         self._column_popup.raise_()
         self._column_popup.activateWindow()
-
     def load_table(self):
         cities=[c["name"] for c in self.settings.get("cities",[])]
         orgs=self.db.get_active_organizations(cities,self.settings.get("period_days",30));self._updating_table=True;self.org_table.setSortingEnabled(False);self.org_table.setRowCount(0)
@@ -574,6 +580,8 @@ class MainWindow(QMainWindow):
         for c,v in enumerate(vals):
             it=(NextContactItem(str(v)) if c==OrgColumn.NEXT_CONTACT else QTableWidgetItem(str(v)))
             it.setData(Qt.ItemDataRole.UserRole,o["id"])
+            if c == OrgColumn.NAME:
+                it.setData(Qt.ItemDataRole.UserRole + 2, o.get("categories_json", ""))
             if c==OrgColumn.NEXT_CONTACT:
                 it.setData(Qt.ItemDataRole.UserRole+1,next_contact)
             self.org_table.setItem(r,c,it)
@@ -598,10 +606,11 @@ class MainWindow(QMainWindow):
         age=self.org_table.item(r,OrgColumn.AGE)
         if age:
             n=int(age.text().split()[0]);age.setBackground(QColor("#00C800" if n<=5 else "#FFD700" if n<=15 else "#00BFFF" if n<=25 else "#969696"))
+    def on_category_filter_changed(self): self.apply_filters(); self.apply_map()
     def apply_filters(self):
         filters = {
             "search": self.search_edit.text(),
-            "category": self.cat_filter.currentData(),
+            "category_names": self.category_filter.checked_values(),
             "status": self.status_filter.currentData(),
             "city_names": self.settlement_filter.checked_values(),
             "phone_mode": self.phone_cb.mode,
@@ -611,14 +620,16 @@ class MainWindow(QMainWindow):
             "responsible_mode": self.responsible_cb.mode,
             "next_contact_mode": self.next_contact_cb.mode,
         }
-        visible = 0
+        visible_search_columns=[c for c in range(self.org_table.columnCount()) if not self.org_table.isColumnHidden(c)]; visible=0
         for row in range(self.org_table.rowCount()):
+            search_values=[self.org_table.item(row,c).text() for c in visible_search_columns if self.org_table.item(row,c) is not None]
             org = {
                 "name": self.org_table.item(row, 0).text() if self.org_table.item(row, 0) else "",
                 "address": self.org_table.item(row, OrgColumn.ADDRESS).text() if self.org_table.item(row, OrgColumn.ADDRESS) else "",
                 "city_name": self.org_table.item(row, OrgColumn.SETTLEMENT).text() if self.org_table.item(row, OrgColumn.SETTLEMENT) else "",
                 "category": self.org_table.item(row, OrgColumn.CATEGORY).text().split(" → ")[0] if self.org_table.item(row, OrgColumn.CATEGORY) else "",
                 "subcategory": self.org_table.item(row, OrgColumn.CATEGORY).text().split(" → ", 1)[1] if self.org_table.item(row, OrgColumn.CATEGORY) and " → " in self.org_table.item(row, OrgColumn.CATEGORY).text() else "",
+                "categories_json": self.org_table.item(row, OrgColumn.NAME).data(Qt.ItemDataRole.UserRole + 2) if self.org_table.item(row, OrgColumn.NAME) else "",
                 "status": self.org_table.item(row, OrgColumn.STATUS).text() if self.org_table.item(row, OrgColumn.STATUS) else "",
                 "phone": self.org_table.item(row, OrgColumn.PHONE).text() if self.org_table.item(row, OrgColumn.PHONE) else "",
                 "email": self.org_table.item(row, OrgColumn.EMAIL).text() if self.org_table.item(row, OrgColumn.EMAIL) else "",
@@ -626,6 +637,7 @@ class MainWindow(QMainWindow):
                 "social_links": self.org_table.item(row, OrgColumn.SOCIAL).text() if self.org_table.item(row, OrgColumn.SOCIAL) else "",
                 "responsible": self.org_table.item(row, OrgColumn.RESPONSIBLE).text() if self.org_table.item(row, OrgColumn.RESPONSIBLE) else "",
                 "next_contact_date": str(self.org_table.item(row, OrgColumn.NEXT_CONTACT).data(Qt.ItemDataRole.UserRole + 1) or "") if self.org_table.item(row, OrgColumn.NEXT_CONTACT) else "",
+                "search_values": search_values,
             }
             ok = matches_organization_filters(org, filters)
             self.org_table.setRowHidden(row, not ok)
@@ -762,7 +774,7 @@ class MainWindow(QMainWindow):
     def export_excel(self):
         dlg=ExportDialog(self)
         if dlg.exec()!=QDialog.DialogCode.Accepted:return
-        mode=dlg.mode();cities=[c["name"] for c in self.settings.get("cities",[])]
+        mode=dlg.mode();columns=dlg.selected_columns();cities=[c["name"] for c in self.settings.get("cities",[])]
         if mode=="selected":
             ids=[self.org_table.item(x.row(),0).data(Qt.ItemDataRole.UserRole) for x in self.org_table.visible_selected_rows()]
             orgs=[self.db.get_by_id(x) for x in ids]
@@ -780,7 +792,7 @@ class MainWindow(QMainWindow):
         if not path:return
         if not path.lower().endswith(".xlsx"):path+=".xlsx"
         try:
-            engine=ExportService().export(path,orgs);self.logger.log_general("OK",f"Excel сохранён ({engine}): {path}; записей: {len(orgs)}")
+            engine=ExportService().export(path,orgs,columns=columns);self.logger.log_general("OK",f"Excel сохранён ({engine}): {path}; записей: {len(orgs)}; столбцов: {len(columns)}")
             self.statusBar().showMessage(f"Экспорт завершён: {len(orgs)} организаций")
         except Exception as e:
             self.logger.log_general("ERROR",f"Ошибка Excel: {e}");QMessageBox.critical(self,"Ошибка экспорта",str(e))

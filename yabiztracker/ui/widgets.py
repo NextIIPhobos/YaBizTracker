@@ -49,11 +49,12 @@ class PresenceFilterButton(QPushButton):
 
 
 class CheckableDropdown(QWidget):
-    """Compact multi-select dropdown with a real checkbox list.
+    """Responsive multi-select popup with searchable checkbox list.
 
-    The widget keeps its state as a set of values and exposes a single
-    ``changed`` signal. It is intentionally independent of the organization
-    table, so it can be reused for other faceted filters later.
+    The popup is shared by large faceted filters such as settlements and
+    categories.  All values are checked when the list is initialized without
+    an explicit selection.  A later ``set_items`` call preserves the supplied
+    selection and silently drops values that no longer exist.
     """
 
     changed = pyqtSignal()
@@ -63,82 +64,140 @@ class CheckableDropdown(QWidget):
         self._items: dict[str, QCheckBox] = {}
         self._title = title
         self._popup = None
+        self._search_edit = None
+        self._list_widget = None
+        self._scroll = None
+        self._values: list[str] = []
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         self.button = QPushButton(title)
         self.button.setMinimumWidth(180)
+        self.button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.button.clicked.connect(self._toggle_popup)
         layout.addWidget(self.button)
 
     def set_items(self, values, checked=None):
-        checked = {str(v) for v in (checked or [])}
+        normalized = []
+        seen = set()
+        for value in values:
+            text = str(value).strip()
+            key = text.casefold()
+            if text and key not in seen:
+                normalized.append(text)
+                seen.add(key)
+        normalized.sort(key=str.casefold)
+        was_all_selected = bool(self._items) and len(self.checked_values()) == len(self._items)
+        previous = {str(v).strip() for v in (checked or [])}
+        initial = checked is None or was_all_selected
+        selected_keys = {v.casefold() for v in previous}
+
         self._items.clear()
+        self._values = normalized
         if self._popup is not None:
             self._popup.deleteLater()
             self._popup = None
 
         popup = QFrame(self, Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint)
         popup.setFrameShape(QFrame.Shape.StyledPanel)
-        popup.setMinimumWidth(max(220, self.width()))
+        popup.setMinimumWidth(max(260, self.width(), 320 if len(normalized) > 30 else 0))
+        popup.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
         outer = QVBoxLayout(popup)
         outer.setContentsMargins(8, 8, 8, 8)
-        outer.setSpacing(4)
+        outer.setSpacing(5)
+
+        search = QLineEdit()
+        search.setPlaceholderText(f"Поиск {self._title.lower()}…")
+        search.setClearButtonEnabled(True)
+        search.setMinimumHeight(30)
+        outer.addWidget(search)
+        self._search_edit = search
 
         actions = QHBoxLayout()
         all_btn = QPushButton("Выбрать все")
-        none_btn = QPushButton("Сбросить")
+        none_btn = QPushButton("Снять все")
         actions.addWidget(all_btn)
         actions.addWidget(none_btn)
         outer.addLayout(actions)
 
         list_box = QWidget()
         list_layout = QVBoxLayout(list_box)
-        list_layout.setContentsMargins(0, 0, 0, 0)
+        list_layout.setContentsMargins(2, 0, 2, 0)
         list_layout.setSpacing(2)
+        self._list_widget = list_box
 
-        for value in values:
-            text = str(value).strip()
-            if not text or text in self._items:
-                continue
+        for text in normalized:
             cb = QCheckBox(text)
-            cb.setChecked(text in checked)
+            cb.setChecked(initial or text.casefold() in selected_keys)
             cb.stateChanged.connect(self._on_state_changed)
             self._items[text] = cb
             list_layout.addWidget(cb)
 
-        if not self._items:
-            empty = QLabel("Нет настроенных населённых пунктов")
-            empty.setEnabled(False)
-            list_layout.addWidget(empty)
+        empty = QLabel("Нет доступных значений")
+        empty.setEnabled(False)
+        list_layout.addWidget(empty)
+        empty.setVisible(not self._items)
+        self._empty_label = empty
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
-        scroll.setMaximumHeight(300)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         scroll.setWidget(list_box)
-        outer.addWidget(scroll)
+        self._scroll = scroll
+        outer.addWidget(scroll, 1)
+
         all_btn.clicked.connect(lambda: self._set_all(True))
         none_btn.clicked.connect(lambda: self._set_all(False))
+        search.textChanged.connect(self._filter_items)
+
         self._popup = popup
         self._update_button()
+        self._resize_popup_to_screen()
+
+    def _filter_items(self, text):
+        query = str(text or "").strip().casefold()
+        visible = 0
+        for value, cb in self._items.items():
+            show = not query or query in value.casefold()
+            cb.setVisible(show)
+            if show:
+                visible += 1
+        self._empty_label.setVisible(visible == 0)
+        self._resize_popup_to_screen()
+
+    def _resize_popup_to_screen(self):
+        if self._popup is None:
+            return
+        screen = self.screen()
+        available = screen.availableGeometry() if screen else None
+        if available:
+            max_height = max(220, int(available.height() * 0.72))
+            self._scroll.setMaximumHeight(max_height - 105)
+            self._popup.setMaximumHeight(max_height)
+            self._popup.setMaximumWidth(min(520, max(320, int(available.width() * 0.42))))
+        self._popup.adjustSize()
 
     def _toggle_popup(self):
         if self._popup is None:
             return
-        self._popup.adjustSize()
+        self._resize_popup_to_screen()
         pos = self.mapToGlobal(self.rect().bottomLeft())
         screen = self.screen()
         if screen:
             available = screen.availableGeometry()
             x = min(pos.x(), available.right() - self._popup.width())
             y = min(pos.y(), available.bottom() - self._popup.height())
+            if y < available.top():
+                y = max(available.top(), self.mapToGlobal(self.rect().topLeft()).y() - self._popup.height())
             pos.setX(max(available.left(), x))
             pos.setY(max(available.top(), y))
         self._popup.move(pos)
         self._popup.show()
         self._popup.raise_()
         self._popup.activateWindow()
+        self._search_edit.setFocus()
 
     def _set_all(self, checked):
         for cb in self._items.values():
@@ -154,10 +213,12 @@ class CheckableDropdown(QWidget):
 
     def _update_button(self):
         selected = self.checked_values()
-        if not selected:
+        if not self._items:
             text = self._title
         elif len(selected) == len(self._items):
             text = f"{self._title}: все"
+        elif not selected:
+            text = f"{self._title}: ничего"
         else:
             text = f"{self._title}: {len(selected)}"
         self.button.setText(text)
@@ -168,7 +229,6 @@ class CheckableDropdown(QWidget):
     def close_popup(self):
         if self._popup is not None:
             self._popup.hide()
-
 
 
 class ColumnVisibilityPopup(QFrame):

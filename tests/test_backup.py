@@ -36,3 +36,30 @@ class BackupTests(unittest.TestCase):
         self.assertFalse(verify_sqlite_file(str(p))[0]); self.assertIsNone(self.service.latest_valid_backup())
 
 if __name__=='__main__': unittest.main()
+
+
+class CleanupTests(unittest.TestCase):
+    def test_delete_all_backups_removes_only_managed_backups(self):
+        import tempfile, os
+        from yabiztracker.services.backup import BackupService
+        with tempfile.TemporaryDirectory() as d:
+            for name in ("organizations_2026-01-01_00-00-00.db","organizations_2026-01-02_00-00-00_1.db","keep.txt"):
+                open(os.path.join(d,name),"w").close()
+            service=BackupService(None,d,14)
+            self.assertEqual(service.delete_all_backups(),2)
+            self.assertEqual(service.list_backups(),[])
+            self.assertTrue(os.path.exists(os.path.join(d,"keep.txt")))
+
+    def test_delete_auxiliary_files_preserves_application_data(self):
+        import tempfile, os
+        from yabiztracker.services.backup import BackupService
+        with tempfile.TemporaryDirectory() as d:
+            for name in ("a.tmp","organizations.db","settings.json","categories.txt"):
+                open(os.path.join(d,name),"w").close()
+            os.mkdir(os.path.join(d,"__pycache__"))
+            open(os.path.join(d,"__pycache__","x.pyc"),"w").close()
+            removed=BackupService.delete_auxiliary_files(d)
+            self.assertGreaterEqual(removed,2)
+            self.assertTrue(os.path.exists(os.path.join(d,"organizations.db")))
+            self.assertTrue(os.path.exists(os.path.join(d,"settings.json")))
+            self.assertTrue(os.path.exists(os.path.join(d,"categories.txt")))

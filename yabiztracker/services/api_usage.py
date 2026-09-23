@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import threading
+import time
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -117,7 +118,36 @@ class ApiUsageService:
         os.makedirs(os.path.dirname(os.path.abspath(self.path)), exist_ok=True)
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(self._data, f, ensure_ascii=False, indent=2)
-        os.replace(tmp, self.path)
+        # Windows can transiently deny replacement when another local process
+        # (e.g. antivirus/indexer) briefly holds the destination file. Retry
+        # the atomic replace before falling back to a direct overwrite.
+        last_error = None
+        for attempt in range(5):
+            try:
+                os.replace(tmp, self.path)
+                return
+            except PermissionError as exc:
+                last_error = exc
+                if attempt < 4:
+                    time.sleep(0.05 * (attempt + 1))
+        # If replacement remains unavailable, write the already-complete JSON
+        # directly to the destination. This is a last-resort Windows fallback;
+        # the normal path above remains atomic.
+        try:
+            with open(tmp, "rb") as src, open(self.path, "wb") as dst:
+                dst.write(src.read())
+                dst.flush()
+                os.fsync(dst.fileno())
+            os.remove(tmp)
+            return
+        except OSError:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+            if last_error is not None:
+                raise last_error
+            raise
 
     @staticmethod
     def _period_start(anchor: date, frequency: str, today: date) -> date:

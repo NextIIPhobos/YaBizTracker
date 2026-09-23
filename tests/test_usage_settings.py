@@ -101,6 +101,29 @@ class SchedulerPersistenceTests(unittest.TestCase):
         assert 'self.scheduler.add_job(self._scheduler_request,"date",run_date=next_scan' in text
         assert 'self._persist_next_scan_at(next_scan)' in text
 
+
+class UsageWindowsPersistenceTests(unittest.TestCase):
+    def test_save_retries_transient_windows_permission_error(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = str(Path(d) / "usage.json")
+            u = ApiUsageService(p, "2026-09-01", "daily")
+            real_replace = __import__("os").replace
+            calls = {"count": 0}
+
+            def flaky_replace(src, dst):
+                calls["count"] += 1
+                if calls["count"] < 3:
+                    raise PermissionError(5, "Access is denied")
+                return real_replace(src, dst)
+
+            with unittest.mock.patch("yabiztracker.services.api_usage.os.replace", side_effect=flaky_replace):
+                u.record("search")
+                u.flush()
+
+            self.assertGreaterEqual(calls["count"], 3)
+            self.assertEqual(u.snapshot()["period_usage"]["search"], 1)
+
+
 if __name__=='__main__': unittest.main()
 
 

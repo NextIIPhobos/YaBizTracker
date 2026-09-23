@@ -230,3 +230,15 @@ def test_export_contains_settlement_column():
     source=(ROOT.parent / "yabiztracker" / "services" / "export_service.py").read_text(encoding="utf-8")
     assert '"Населённый пункт"' in source
     assert 'o.get("city_name", "")' in source
+
+
+def test_main_window_responsive_splitter_and_table_do_not_overflow_left_pane():
+    source=(ROOT / "ui" / "main_window.py").read_text(encoding="utf-8")
+    assert "self.org_table.setMinimumSize(0,0)" in source
+    assert "self.org_table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)" in source
+    assert "left.setMinimumWidth(440)" in source
+    assert "center.setMinimumWidth(460)" in source
+    assert "right.setMinimumWidth(250)" in source
+    assert "QGridLayout()" in source
+    assert "i//3,i%3" in source
+    assert "center=max(460,w-left-right)" in source

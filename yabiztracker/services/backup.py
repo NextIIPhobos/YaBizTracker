@@ -90,6 +90,43 @@ class BackupService:
             except OSError:
                 pass
 
+    def delete_all_backups(self) -> int:
+        """Delete every managed backup in the configured backup directory."""
+        removed = 0
+        for path in self.list_backups():
+            try:
+                os.remove(path)
+                removed += 1
+            except OSError as exc:
+                raise BackupError(f"Не удалось удалить резервную копию: {path}: {exc}") from exc
+        return removed
+
+    @staticmethod
+    def delete_auxiliary_files(base_dir: str) -> int:
+        """Remove safe-to-regenerate application leftovers, never user data."""
+        import shutil
+        base = os.path.abspath(base_dir)
+        removed = 0
+        patterns = (".tmp", ".restore.tmp")
+        for root, dirs, files in os.walk(base):
+            # Never touch backups, the database, or user configuration/data.
+            dirs[:] = [d for d in dirs if d not in {"backups", ".git"}]
+            for name in files:
+                path = os.path.join(root, name)
+                if name.endswith(patterns) or ".corrupt_" in name:
+                    try:
+                        os.remove(path); removed += 1
+                    except OSError:
+                        pass
+            for d in list(dirs):
+                if d == "__pycache__":
+                    path = os.path.join(root, d)
+                    try:
+                        shutil.rmtree(path); removed += 1
+                    except OSError:
+                        pass
+        return removed
+
     def restore(self, backup_path: str) -> None:
         backup_path = os.path.abspath(backup_path)
         if backup_path not in [os.path.abspath(x) for x in self.list_backups()]:

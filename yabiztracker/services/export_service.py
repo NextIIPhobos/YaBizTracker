@@ -171,7 +171,7 @@ class ExportService:
                 except OSError:
                     pass
 
-    def _openpyxl_writer(self, rows, links):
+    def _openpyxl_writer(self, rows, links, headers, widths):
         from openpyxl import Workbook
         from openpyxl.styles import Font
         from openpyxl.utils import get_column_letter
@@ -181,18 +181,18 @@ class ExportService:
             ws = wb.active
             ws.title = "Организации"
 
-            ws.append(self.HEADERS)
+            ws.append(headers)
             for cell in ws[1]:
                 cell.font = Font(bold=True)
 
             for row in rows:
                 ws.append(row)
 
-            for i, width in enumerate(self.WIDTHS, 1):
+            for i, width in enumerate(widths, 1):
                 ws.column_dimensions[get_column_letter(i)].width = width
 
             ws.freeze_panes = "A2"
-            ws.auto_filter.ref = f"A1:{get_column_letter(len(self.HEADERS))}{max(1, len(rows) + 1)}"
+            ws.auto_filter.ref = f"A1:{get_column_letter(len(headers))}{max(1, len(rows) + 1)}"
 
             for ref, url in links.items():
                 ws[ref].hyperlink = url
@@ -202,12 +202,12 @@ class ExportService:
 
         return writer
 
-    def _fallback_writer(self, rows, links):
+    def _fallback_writer(self, rows, links, headers, widths):
         return lambda tmp: write_xlsx(
-            tmp, self.HEADERS, rows, links, self.WIDTHS
+            tmp, headers, rows, links, widths
         )
 
-    def export(self, path, orgs):
+    def export(self, path, orgs, columns=None):
         """
         Export is deliberately fail-safe:
         - normal engine: openpyxl;
@@ -216,20 +216,42 @@ class ExportService:
 
         Thus a failed export can never leave a half-written/corrupt target file.
         """
-        rows = [self._normalise_org(o) for o in orgs]
+        if columns is None:
+            columns = list(range(len(self.HEADERS)))
+        try:
+            columns = [int(i) for i in columns]
+        except (TypeError, ValueError):
+            raise ValueError("Некорректный список столбцов для экспорта")
+        if not columns:
+            raise ValueError("Не выбран ни один столбец для экспорта")
+        if len(set(columns)) != len(columns) or any(i < 0 or i >= len(self.HEADERS) for i in columns):
+            raise ValueError("Некорректный список столбцов для экспорта")
+
+        all_rows = [self._normalise_org(o) for o in orgs]
+        rows = [[row[i] for i in columns] for row in all_rows]
+        headers = [self.HEADERS[i] for i in columns]
+        widths = [self.WIDTHS[i] for i in columns]
 
         links = {}
-        for row_number, org in enumerate(orgs, 2):
-            url = self._safe_url(org.get("website", ""))
-            if url:
-                links[f"H{row_number}"] = url
+        website_index = self.HEADERS.index("Сайт")
+        if website_index in columns:
+            export_col = columns.index(website_index) + 1
+            col_letter = ""
+            n = export_col
+            while n:
+                n, rem = divmod(n - 1, 26)
+                col_letter = chr(65 + rem) + col_letter
+            for row_number, org in enumerate(orgs, 2):
+                url = self._safe_url(org.get("website", ""))
+                if url:
+                    links[f"{col_letter}{row_number}"] = url
 
         errors = []
 
         try:
             from openpyxl import Workbook  # noqa: F401
             self._atomic_replace(
-                path, self._openpyxl_writer(rows, links)
+                path, self._openpyxl_writer(rows, links, headers, widths)
             )
             return "openpyxl"
         except Exception as exc:
@@ -239,7 +261,7 @@ class ExportService:
         # engine is unavailable or cannot create a valid package.
         try:
             self._atomic_replace(
-                path, self._fallback_writer(rows, links)
+                path, self._fallback_writer(rows, links, headers, widths)
             )
             return "fallback"
         except Exception as exc:

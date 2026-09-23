@@ -21,7 +21,7 @@ class CheckableDropdownTests(unittest.TestCase):
         widget = CheckableDropdown("Населённый пункт")
         widget.set_items(["Самара", "Тольятти", "Самара"])
         self.assertEqual(set(widget._items), {"Самара", "Тольятти"})
-        self.assertEqual(widget.checked_values(), set())
+        self.assertEqual(widget.checked_values(), {"Самара", "Тольятти"})
 
     def test_checked_values_roundtrip_and_select_all(self):
         widget = CheckableDropdown("Населённый пункт")
@@ -30,6 +30,27 @@ class CheckableDropdownTests(unittest.TestCase):
         self.assertEqual(widget.checked_values(), {"Самара", "Тольятти"})
         widget._set_all(False)
         self.assertEqual(widget.checked_values(), set())
+
+
+    def test_search_field_filters_visible_checkboxes_only(self):
+        widget = CheckableDropdown("Категории")
+        widget.set_items(["Кафе", "Кофейня", "Автосервис"])
+        # QCheckBox.isVisible() is false while any parent widget is hidden.
+        # Show the popup so this test checks the actual user-visible state.
+        widget._popup.show()
+        self.app.processEvents()
+        widget._search_edit.setText("коф")
+        self.app.processEvents()
+        self.assertFalse(widget._items["Кафе"].isVisible())
+        self.assertTrue(widget._items["Кофейня"].isVisible())
+        self.assertFalse(widget._items["Автосервис"].isVisible())
+
+    def test_category_list_is_scrollable_and_popup_is_screen_bounded(self):
+        widget = CheckableDropdown("Категории")
+        widget.set_items([f"Категория {i}" for i in range(500)])
+        self.assertIsNotNone(widget._scroll)
+        self.assertGreater(widget._scroll.maximumHeight(), 0)
+        self.assertLessEqual(widget._popup.maximumHeight(), widget.screen().availableGeometry().height())
 
     def test_refresh_drops_stale_settlement_values(self):
         widget = CheckableDropdown("Населённый пункт")

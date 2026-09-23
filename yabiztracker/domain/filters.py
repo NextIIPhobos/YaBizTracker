@@ -62,21 +62,38 @@ def matches_organization_filters(org: Mapping, filters: Mapping | None = None) -
     filters = filters or {}
     search = str(filters.get("search") or "").strip().casefold()
     if search:
-        haystack = (
-            str(org.get("name") or "").casefold(),
-            str(org.get("address") or "").casefold(),
-            str(org.get("city_name") or "").casefold(),
-            str(org.get("category") or "").casefold(),
-            str(org.get("subcategory") or "").casefold(),
-        )
+        provided_values = filters.get("search_values")
+        if provided_values is not None:
+            haystack = tuple(str(value or "").casefold() for value in provided_values)
+        else:
+            haystack = (
+                str(org.get("name") or "").casefold(),
+                str(org.get("address") or "").casefold(),
+                str(org.get("city_name") or "").casefold(),
+                str(org.get("category") or "").casefold(),
+                str(org.get("subcategory") or "").casefold(),
+            )
         if not any(search in value for value in haystack):
             return False
 
-    category = str(filters.get("category") or "")
-    if category:
-        wanted = normalize_category(category)
-        if wanted not in organization_categories(org):
+    if "category_names" in filters:
+        selected_categories = {
+            normalize_category(value)
+            for value in (filters.get("category_names") or [])
+            if normalize_category(value)
+        }
+        # An explicitly empty category selection means that the user turned
+        # every category off. Omitting the key remains the unfiltered state.
+        if not selected_categories:
             return False
+        if organization_categories(org).isdisjoint(selected_categories):
+            return False
+    else:
+        category = str(filters.get("category") or "")
+        if category:
+            wanted = normalize_category(category)
+            if wanted not in organization_categories(org):
+                return False
 
     status = str(filters.get("status") or "")
     if status and str(org.get("status") or "") != status:

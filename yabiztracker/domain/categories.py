@@ -12,3 +12,92 @@ for _letter, _values in YANDEX_BOOKING_EXTRAS.items():
 
 
 DEFAULT_CATEGORIES=[x for s in YANDEX_ACTIVITIES.values() for x in s.split('|')]
+
+
+CATEGORIES_FILENAME = "categories.txt"
+CATEGORIES_COMMENT = "# Категории должны разделяться символом ';'. Не удаляйте эту строку комментария."
+
+def default_categories() -> list[str]:
+    """Return the built-in category catalog in deterministic order."""
+    return [x.strip() for values in YANDEX_ACTIVITIES.values() for x in values.split("|") if x.strip()]
+
+
+def _category_key(value: str) -> str:
+    return " ".join(value.replace("ё", "е").replace("Ё", "Е").split()).casefold()
+
+
+def normalize_category_catalog(values) -> list[str]:
+    result, seen = [], set()
+    for value in values or []:
+        text = str(value or "").strip()
+        if not text or text.startswith("#"):
+            continue
+        key = _category_key(text)
+        if key not in seen:
+            seen.add(key)
+            result.append(text)
+    return result
+
+
+def categories_file_path(base_dir: str) -> str:
+    import os
+    return os.path.join(os.path.abspath(base_dir), CATEGORIES_FILENAME)
+
+
+def ensure_categories_file(base_dir: str) -> str:
+    """Create the user-editable category catalog only on first launch."""
+    import os
+    path = categories_file_path(base_dir)
+    if not os.path.exists(path):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        write_categories_file(path, default_categories())
+    return path
+
+
+def write_categories_file(path: str, categories) -> None:
+    import os
+    values = normalize_category_catalog(categories)
+    directory = os.path.dirname(os.path.abspath(path))
+    os.makedirs(directory, exist_ok=True)
+    tmp = path + ".tmp"
+    try:
+        with open(tmp, "w", encoding="utf-8", newline="\n") as f:
+            f.write(CATEGORIES_COMMENT + "\n")
+            f.write(";".join(values) + "\n")
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    finally:
+        if os.path.exists(tmp):
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+
+
+def load_categories_file(path: str) -> list[str]:
+    """Read the catalog from categories.txt; comments and blank fragments are ignored."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            content = f.read()
+    except (OSError, UnicodeError):
+        return default_categories()
+    lines = [line.strip() for line in content.splitlines() if not line.lstrip().startswith("#")]
+    return normalize_category_catalog(";".join(lines).split(";"))
+
+
+def categories_to_activities(categories) -> dict[str, str]:
+    """Build the tree groups used by SettingsDialog from the current text file."""
+    groups: dict[str, list[str]] = {}
+    for category in normalize_category_catalog(categories):
+        letter = next((ch.upper() for ch in category if ch.isalpha()), "Другое")
+        # Keep the original UI's special 'И, Й' grouping and 'Другое' bucket.
+        if letter in {"И", "Й"}:
+            group = "И, Й"
+        elif letter not in set("АБВГДЖЗКЛМНОПРСТУФХЦЧШЭЮЯ"):
+            group = "Другое"
+        else:
+            group = letter
+        groups.setdefault(group, []).append(category)
+    order = ["А","Б","В","Г","Д","Е","Ж","З","И, Й","К","Л","М","Н","О","П","Р","С","Т","У","Ф","Х","Ц","Ч","Ш","Э","Ю","Я","Другое"]
+    return {group: "|".join(groups[group]) for group in order if group in groups}

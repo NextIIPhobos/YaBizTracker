@@ -14,7 +14,7 @@ from PyQt6.QtWidgets import (QApplication, QDialog, QVBoxLayout, QHBoxLayout, QL
     QFileDialog, QHeaderView, QTableWidget, QTableWidgetItem, QWidget)
 
 from ..api import YandexAPI
-from ..domain.categories import YANDEX_ACTIVITIES
+from ..domain.categories import ensure_categories_file, load_categories_file, categories_to_activities
 from ..domain.models import STATUS_OPTIONS
 from ..services.backup import BackupService
 from ..services.export_service import ExportService
@@ -28,6 +28,9 @@ class SettingsDialog(QDialog):
     def __init__(self,parent,api,current,config,usage,base_dir):
         super().__init__(parent)
         self.api=api; self.current=current; self.config=config; self.usage=usage; self.base_dir=base_dir
+        self.categories_path=ensure_categories_file(base_dir)
+        self.category_catalog=load_categories_file(self.categories_path)
+        self.category_file_mtime=self._categories_mtime()
         self.result_config=None; self.result_api_keys=None
         self.profile_service=ProfileService(current); self.active_city=None; self.suggest_worker=None; self.suggest_workers=[]; self.suggest_request_id=0; self.suggest_cache={}; self.timer=None; self._guard=False
         self.setWindowTitle("Настройки YaBizTracker"); self.resize(900,656); self.setMinimumSize(760,500)
@@ -115,6 +118,15 @@ class SettingsDialog(QDialog):
         bf.addRow("Папка:",roww)
         backup_actions=QHBoxLayout(); nowb=QPushButton("Создать резервную копию сейчас"); openb=QPushButton("Открыть папку")
         nowb.clicked.connect(self.create_backup_now); openb.clicked.connect(self.open_backup_folder); backup_actions.addWidget(nowb); backup_actions.addWidget(openb); backup_actions.addStretch(); bf.addRow("",backup_actions)
+        cleanup_actions=QHBoxLayout()
+        delete_backups=QPushButton("Удалить все бэкапы")
+        delete_logs=QPushButton("Удалить все логи")
+        delete_aux=QPushButton("Удалить вспомогательные файлы")
+        delete_backups.clicked.connect(self.delete_all_backups)
+        delete_logs.clicked.connect(self.delete_all_logs)
+        delete_aux.clicked.connect(self.delete_auxiliary_files)
+        for button in (delete_backups,delete_logs,delete_aux): cleanup_actions.addWidget(button)
+        cleanup_actions.addStretch(); bf.addRow("Очистка:",cleanup_actions)
         self.backup_status=QLabel("Резервная копия создаётся при запуске и затем ежедневно."); self.backup_status.setWordWrap(True); bf.addRow("Состояние:",self.backup_status)
         content_layout.addWidget(backup)
 
@@ -164,6 +176,13 @@ class SettingsDialog(QDialog):
         self.category_search.setMinimumHeight(30)
         self.category_search.textChanged.connect(self.filter_categories)
         content_layout.addWidget(self.category_search)
+        category_file_row=QHBoxLayout()
+        self.edit_categories_btn=QPushButton("Изменить список категорий")
+        self.edit_categories_btn.setToolTip("Открыть categories.txt. После сохранения и закрытия файла список категорий в программе обновится автоматически.")
+        self.edit_categories_btn.clicked.connect(self.open_categories_file)
+        category_file_row.addWidget(self.edit_categories_btn)
+        category_file_row.addStretch()
+        content_layout.addLayout(category_file_row)
         category_split=QHBoxLayout()
         include_box=QGroupBox("Искать")
         include_layout=QVBoxLayout(include_box)
@@ -181,11 +200,12 @@ class SettingsDialog(QDialog):
         exclude_controls.addWidget(ex_all); exclude_controls.addWidget(ex_none); exclude_layout.addLayout(exclude_controls)
         category_split.addWidget(include_box,1); category_split.addWidget(exclude_box,1); content_layout.addLayout(category_split,1)
         test=QPushButton("🔎 Тестовый поиск"); test.clicked.connect(self.test_search); content_layout.addWidget(test)
-        self.category_controls=(allb,noneb,ex_all,ex_none,test,self.category_search)
+        self.category_controls=(allb,noneb,ex_all,ex_none,test,self.category_search,self.edit_categories_btn)
         self.test_result=QLabel(""); self.test_result.setStyleSheet("color:#555"); content_layout.addWidget(self.test_result)
 
         buttons=QDialogButtonBox(QDialogButtonBox.StandardButton.Cancel|QDialogButtonBox.StandardButton.Save); buttons.button(QDialogButtonBox.StandardButton.Save).setText("Сохранить и искать"); buttons.accepted.connect(self.accept_settings); buttons.rejected.connect(self.reject); root.addWidget(buttons)
-        self.city_edit_timer=QTimer(self); self.city_edit_timer.setSingleShot(True); self.city_edit_timer.timeout.connect(self._suggest); self.suggestions.itemClicked.connect(self.select_suggestion); self.tree.itemChanged.connect(lambda item,col:self.on_tree_changed(self.tree,item,col)); self.excluded_tree.itemChanged.connect(lambda item,col:self.on_tree_changed(self.excluded_tree,item,col))
+        self.city_edit_timer=QTimer(self); self.city_edit_timer.setSingleShot(True); self.city_edit_timer.timeout.connect(self._suggest)
+        self.category_file_timer=QTimer(self); self.category_file_timer.setInterval(1000); self.category_file_timer.timeout.connect(self._check_categories_file); self.category_file_timer.start(); self.suggestions.itemClicked.connect(self.select_suggestion); self.tree.itemChanged.connect(lambda item,col:self.on_tree_changed(self.tree,item,col)); self.excluded_tree.itemChanged.connect(lambda item,col:self.on_tree_changed(self.excluded_tree,item,col))
         for e in self.api_fields: e.textChanged.connect(self._api_changed)
         self.build_tree(current.get("categories",[]), current.get("excluded_categories",[]))
         cities=current.get("cities") or ([] if not current.get("city") else [current["city"]])
@@ -193,10 +213,42 @@ class SettingsDialog(QDialog):
         if not self.city_rows: self.add_city_row()
         self._update_search_controls()
 
+    def _categories_mtime(self):
+        try:
+            return os.path.getmtime(self.categories_path)
+        except OSError:
+            return None
+
+    def open_categories_file(self):
+        try:
+            ensure_categories_file(self.base_dir)
+            if not QDesktopServices.openUrl(QUrl.fromLocalFile(self.categories_path)):
+                if hasattr(os, "startfile"):
+                    os.startfile(self.categories_path)
+            self.category_file_mtime=self._categories_mtime()
+        except Exception as exc:
+            QMessageBox.warning(self, "Категории", f"Не удалось открыть categories.txt: {exc}")
+
+    def _check_categories_file(self):
+        mtime=self._categories_mtime()
+        if mtime is None or mtime == self.category_file_mtime:
+            return
+        self.category_file_mtime=mtime
+        categories=load_categories_file(self.categories_path)
+        if not categories:
+            QMessageBox.warning(self, "Категории", "В categories.txt не найдено ни одной категории. Список оставлен без изменений.")
+            return
+        selected=set(self.categories())
+        excluded=set(self.excluded_categories())
+        self.category_catalog=categories
+        self.build_tree([x for x in selected if x in categories], [x for x in excluded if x in categories])
+        self.test_result.setText(f"Список категорий обновлён: {len(categories)} категорий.")
+
     def closeEvent(self,event):
         # Suggestion requests are best-effort. They are short-lived and their
         # results are guarded by request_id, so closing Settings never blocks
         # the UI for an in-flight HTTP request.
+        if hasattr(self, 'category_file_timer'): self.category_file_timer.stop()
         for worker in list(self.suggest_workers):
             if worker.isRunning():
                 worker.requestInterruption()
@@ -215,6 +267,42 @@ class SettingsDialog(QDialog):
         except Exception as exc:
             self.backup_status.setText("⚠ Ошибка резервного копирования: "+str(exc))
             QMessageBox.warning(self,"Резервное копирование",str(exc))
+
+    def delete_all_backups(self):
+        service=BackupService(self.parent().db if hasattr(self.parent(),"db") else None,
+                              self.backup_path.text().strip() or os.path.join(self.base_dir,"backups"),
+                              self.backup_retention.value())
+        count=len(service.list_backups())
+        if not count:
+            self.backup_status.setText("Бэкапов для удаления нет.")
+            return
+        if QMessageBox.question(self, "Удаление бэкапов", f"Удалить все {count} резервных копии? Это действие нельзя отменить.",
+                                QMessageBox.StandardButton.Yes|QMessageBox.StandardButton.No) != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            removed=service.delete_all_backups()
+            self.backup_status.setText(f"✓ Удалено резервных копий: {removed}")
+        except Exception as exc:
+            QMessageBox.warning(self, "Удаление бэкапов", str(exc))
+
+    def delete_all_logs(self):
+        if QMessageBox.question(self, "Удаление логов", "Удалить все журналы приложения? База данных и настройки не будут затронуты.",
+                                QMessageBox.StandardButton.Yes|QMessageBox.StandardButton.No) != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            logger=getattr(self.parent(), "logger", None)
+            removed=logger.clear_logs(self.base_dir) if logger is not None else 0
+            self.backup_status.setText(f"✓ Удалено файлов журналов: {removed}")
+        except Exception as exc:
+            QMessageBox.warning(self, "Удаление логов", str(exc))
+
+    def delete_auxiliary_files(self):
+        if QMessageBox.question(self, "Удаление вспомогательных файлов",
+                                "Удалить временные, восстановительные и __pycache__-файлы? База, настройки, категории и бэкапы не будут затронуты.",
+                                QMessageBox.StandardButton.Yes|QMessageBox.StandardButton.No) != QMessageBox.StandardButton.Yes:
+            return
+        removed=BackupService.delete_auxiliary_files(self.base_dir)
+        self.backup_status.setText(f"✓ Удалено вспомогательных файлов: {removed}")
 
     def open_backup_folder(self):
         path=os.path.abspath(os.path.expanduser(self.backup_path.text().strip() or os.path.join(self.base_dir,"backups")))
@@ -346,7 +434,7 @@ class SettingsDialog(QDialog):
     def _populate_category_tree(self, tree, selected):
         selected=set(selected or []); tree.clear(); self._guard=True
         try:
-            for letter,vals in YANDEX_ACTIVITIES.items():
+            for letter,vals in categories_to_activities(self.category_catalog).items():
                 values=vals.split("|"); top=QTreeWidgetItem([letter]); top.setFlags(top.flags()|Qt.ItemFlag.ItemIsUserCheckable)
                 states=[v in selected for v in values]
                 top.setCheckState(0,Qt.CheckState.Checked if all(states) else Qt.CheckState.PartiallyChecked if any(states) else Qt.CheckState.Unchecked); tree.addTopLevelItem(top)
@@ -509,6 +597,7 @@ class SettingsDialog(QDialog):
             except (TypeError, ValueError): pass
 
     def accept_settings(self):
+        self._check_categories_file()
         keys={"js_api_key":self.js.text().strip(),"geocoder_key":self.geo.text().strip(),"search_key":self.search.text().strip()}
         if not all(keys.values()):
             QMessageBox.warning(self,"API-ключи","Заполните все три API-ключа. Пока ключи не заполнены, параметры поиска недоступны.");return
@@ -611,8 +700,9 @@ class TrashDialog(QDialog):
 
 class ExportDialog(QDialog):
     def __init__(self, parent):
-        super().__init__(parent);self.setWindowTitle("Экспорт в Excel");self.resize(420,208)
-        layout=QVBoxLayout(self);layout.addWidget(QLabel("Что экспортировать?"))
+        super().__init__(parent);self.setWindowTitle("Экспорт в Excel");self.resize(520,620);self.setMinimumSize(440,520)
+        layout=QVBoxLayout(self)
+        layout.addWidget(QLabel("Что экспортировать?"))
         self.group=QButtonGroup(self)
         options=[("Текущий отфильтрованный список","visible"),("Все новые за выбранный период","period"),
                  ("Только выбранные","selected"),("Только с e-mail","email"),("Только с телефоном","phone")]
@@ -620,7 +710,31 @@ class ExportDialog(QDialog):
         for i,(txt,val) in enumerate(options):
             b=QRadioButton(txt);self.group.addButton(b,i);b.setProperty("mode",val);layout.addWidget(b);self.buttons.append(b)
         self.buttons[0].setChecked(True)
-        bb=QDialogButtonBox(QDialogButtonBox.StandardButton.Cancel|QDialogButtonBox.StandardButton.Ok);bb.button(QDialogButtonBox.StandardButton.Ok).setText("Экспортировать");bb.accepted.connect(self.accept);bb.rejected.connect(self.reject);layout.addWidget(bb)
+
+        layout.addWidget(QLabel("Столбцы для экспорта:"))
+        columns_box=QWidget();columns_layout=QVBoxLayout(columns_box);columns_layout.setContentsMargins(6,4,6,4);columns_layout.setSpacing(4)
+        self.column_checks=[]
+        for i,name in enumerate(ExportService.HEADERS):
+            check=QCheckBox(name);check.setChecked(True);check.setProperty("column_index",i);columns_layout.addWidget(check);self.column_checks.append(check)
+        columns_layout.addStretch()
+        scroll=QScrollArea();scroll.setWidgetResizable(True);scroll.setWidget(columns_box);scroll.setMinimumHeight(210);layout.addWidget(scroll,1)
+
+        self.select_all_columns=QPushButton("Выбрать все столбцы")
+        self.clear_columns=QPushButton("Снять все")
+        column_actions=QHBoxLayout();column_actions.addWidget(self.select_all_columns);column_actions.addWidget(self.clear_columns);layout.addLayout(column_actions)
+        self.select_all_columns.clicked.connect(lambda: self._set_all_columns(True))
+        self.clear_columns.clicked.connect(lambda: self._set_all_columns(False))
+
+        bb=QDialogButtonBox(QDialogButtonBox.StandardButton.Cancel|QDialogButtonBox.StandardButton.Ok);bb.button(QDialogButtonBox.StandardButton.Ok).setText("Экспортировать");bb.accepted.connect(self._accept_with_validation);bb.rejected.connect(self.reject);layout.addWidget(bb)
+    def _set_all_columns(self, checked):
+        for check in self.column_checks: check.setChecked(checked)
+    def selected_columns(self):
+        return [int(c.property("column_index")) for c in self.column_checks if c.isChecked()]
+    def _accept_with_validation(self):
+        if not self.selected_columns():
+            QMessageBox.warning(self,"Столбцы не выбраны","Выберите хотя бы один столбец для экспорта.")
+            return
+        self.accept()
     def mode(self):
         for b in self.buttons:
             if b.isChecked():return b.property("mode")

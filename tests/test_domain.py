@@ -88,6 +88,22 @@ class CityFilterTests(unittest.TestCase):
         self.assertFalse(matches_organization_filters(org, {"city_names": {"Тольятти"}, "category": "Квесты"}))
 
 
+
+class MultiCategoryFilterTests(unittest.TestCase):
+    def test_selected_categories_are_or_filter(self):
+        org = {"category": "Кафе", "categories_json": '["Кафе", "Ресторан"]'}
+        self.assertTrue(matches_organization_filters(org, {"category_names": {"Кафе", "Бар"}}))
+        self.assertFalse(matches_organization_filters(org, {"category_names": {"Автосервис", "Бар"}}))
+
+    def test_empty_explicit_category_selection_matches_nothing(self):
+        org = {"category": "Кафе"}
+        self.assertFalse(matches_organization_filters(org, {"category_names": set()}))
+
+    def test_category_filter_uses_additional_categories_json(self):
+        org = {"category": "Кафе", "subcategory": "Кофейня", "categories_json": '["Кафе", "Кофейня", "Ресторан"]'}
+        self.assertTrue(matches_organization_filters(org, {"category_names": {"Ресторан"}}))
+
+
 class ExclusionPrecedenceTests(unittest.TestCase):
     def test_excluded_category_wins_over_included_category(self):
         org={"category":"Развлечения","subcategory":"Центр развития ребёнка","categories_json":"[\"Развлечения\",\"Центр развития ребёнка\"]"}
@@ -156,3 +172,37 @@ class SelectionEdgeCaseTests(unittest.TestCase):
 
     def test_invalid_target_never_selects_anything(self):
         self.assertEqual(visible_range([1, 3, 5], 1, 4), [])
+
+
+class CategorySearchScopeTests(unittest.TestCase):
+    def test_search_uses_only_displayed_columns_when_values_are_supplied(self):
+        from yabiztracker.domain.filters import matches_organization_filters
+        org={"name":"Alpha","address":"Samara","city_name":"Samara","category":"Кафе","subcategory":"Кофейня"}
+        self.assertTrue(matches_organization_filters(org, {"search":"alpha", "search_values":["Alpha","Samara"]}))
+        self.assertFalse(matches_organization_filters(org, {"search":"кафе", "search_values":["Alpha","Samara"]}))
+
+    def test_empty_displayed_columns_cannot_match_search(self):
+        from yabiztracker.domain.filters import matches_organization_filters
+        org={"name":"Alpha","address":"Samara"}
+        self.assertFalse(matches_organization_filters(org, {"search":"alpha", "search_values":[]}))
+
+
+class CategoriesFileTests(unittest.TestCase):
+    def test_first_launch_creates_semicolon_catalog_with_comment(self):
+        import tempfile, os
+        from yabiztracker.domain.categories import ensure_categories_file, load_categories_file, CATEGORIES_COMMENT
+        with tempfile.TemporaryDirectory() as d:
+            path=ensure_categories_file(d)
+            self.assertTrue(os.path.isfile(path))
+            lines=open(path,encoding="utf-8").read().splitlines()
+            self.assertEqual(lines[0], CATEGORIES_COMMENT)
+            self.assertGreater(len(load_categories_file(path)), 0)
+            self.assertIn(";", lines[1])
+
+    def test_catalog_is_reloaded_from_user_file_and_deduplicated(self):
+        import tempfile, os
+        from yabiztracker.domain.categories import load_categories_file, write_categories_file
+        with tempfile.TemporaryDirectory() as d:
+            path=os.path.join(d,"categories.txt")
+            write_categories_file(path, ["Кафе","Кафе","Центр развития ребёнка"])
+            self.assertEqual(load_categories_file(path), ["Кафе","Центр развития ребёнка"])
