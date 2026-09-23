@@ -25,7 +25,7 @@ class MapController:
         if self.is_ready():
             self.webview.page().runJavaScript(expression)
 
-    def apply_state(self, organizations=None) -> None:
+    def apply_state(self, organizations=None, fit_viewport: bool = False) -> None:
         if not self.is_ready():
             return
         cities = self.settings.get("cities", [])
@@ -37,7 +37,7 @@ class MapController:
         self._js(
             f"setMapState({json.dumps(cities, ensure_ascii=False)},"
             f"{json.dumps(organizations, ensure_ascii=False)},"
-            f"{int(self.settings.get('period_days', 30))});"
+            f"{int(self.settings.get('period_days', 30))},{str(bool(fit_viewport)).lower()});"
         )
 
     def fit_settlements(self) -> None:
@@ -61,22 +61,11 @@ class MapController:
         self._js(f"setSelectedMarkers({json.dumps(ids, ensure_ascii=False)});")
 
     def fit_after_selection_change(self, table) -> None:
+        """Legacy compatibility method: selection must never move the map viewport."""
         if not self.is_ready():
             return
-        rows = table.visible_selected_rows()
-        if not rows:
-            self.fit_settlements()
-            return
-        orgs = []
-        for index in rows:
-            item = table.item(index.row(), self.org_column.NAME)
-            if not item:
-                continue
-            org = self.db.get_by_id(item.data(Qt.ItemDataRole.UserRole))
-            if org and org.get("latitude") is not None and org.get("longitude") is not None:
-                orgs.append(org)
-        if orgs:
-            self._js(f"fitOnOrganizations({json.dumps(orgs, ensure_ascii=False)});")
+        self.sync_selection(table)
 
     def schedule_selection_fit(self, table, delay: int = 50) -> None:
+        # Kept for compatibility with older callers; intentionally does not move the viewport.
         QTimer.singleShot(delay, lambda: self.fit_after_selection_change(table))

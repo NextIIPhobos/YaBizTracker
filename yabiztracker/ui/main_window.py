@@ -53,7 +53,6 @@ class MainWindow(QMainWindow):
         self.settings["api_limits"]=self.usage.snapshot()["limits"]
         self.db=Database(os.path.join(base_dir,"organizations.db"));self.db.purge_trash(days=30);self.api=YandexAPI(self.config.get("search_key",""),self.config.get("geocoder_key",""),self.usage)
         self.logger=AppLogger(base_dir);self.backup_service=self._build_backup_service();self.bridge=MapBridge();self.scan_worker=None;self.email_worker=None;self.health_worker=None;self.scheduler=None;self.map_ready=False;self.state=AppState.INITIALIZING;self._updating_table=False;self.last_run_usage=None;self._active_orgs=[];self._org_by_id={}
-        self._selection_map_timer=QTimer(self);self._selection_map_timer.setSingleShot(True);self._selection_map_timer.timeout.connect(self.update_map_for_selection)
         self.quota_timer=QTimer(self);self.quota_timer.setSingleShot(True);self.trash_cleanup_timer=QTimer(self);self.trash_cleanup_timer.setInterval(60*60*1000);self.trash_cleanup_timer.timeout.connect(self.cleanup_trash);self.trash_cleanup_timer.start()
         self.setWindowTitle("YaBizTracker — мониторинг новых организаций");self.setWindowIcon(QApplication.instance().windowIcon());self.resize(1880,980);self.setMinimumSize(1200,700)
         self.build_ui()
@@ -259,25 +258,23 @@ class MainWindow(QMainWindow):
         self.logger.log_general("ERROR",msg)
     def marker_selected(self,oid):
         target=str(oid)
-        if hasattr(self,"_selection_map_timer"): self._selection_map_timer.stop()
-        self._suppress_selection_map_fit=True;row=None
         for r in range(self.org_table.rowCount()):
             it=self.org_table.item(r,OrgColumn.NAME)
-            if it and str(it.data(Qt.ItemDataRole.UserRole))==target: row=(r,it);break
-        if row and not self.org_table.isRowHidden(row[0]):
-            r,it=row;self.org_table.setCurrentCell(r,OrgColumn.NAME,QItemSelectionModel.SelectionFlag.ClearAndSelect|QItemSelectionModel.SelectionFlag.Rows);self.org_table.scrollToItem(it);self.selection_changed()
-        elif row:
-            self.logger.log_general("WARNING",f"Клик по маркеру организации {target}, отсутствующей в текущем фильтре")
-        else:
-            self.logger.log_general("WARNING",f"Не удалось найти организацию для маркера: {target}")
-        self._suppress_selection_map_fit=False
+            if not it or str(it.data(Qt.ItemDataRole.UserRole))!=target:
+                continue
+            if self.org_table.isRowHidden(r):
+                self.logger.log_general("WARNING",f"Клик по маркеру организации {target}, отсутствующей в текущем фильтре")
+                return
+            self.org_table.setCurrentCell(r,OrgColumn.NAME,QItemSelectionModel.SelectionFlag.ClearAndSelect|QItemSelectionModel.SelectionFlag.Rows)
+            self.org_table.scrollToItem(it)
+            self.selection_changed()
+            return
+        self.logger.log_general("WARNING",f"Не удалось найти организацию для маркера: {target}")
     def on_map_ready(self):
-        self.map_ready=True;self.api_status_labels["js"].setText("☑ JavaScript API — OK");self.map_controller.apply_state(self._filtered_organizations())
+        self.map_ready=True;self.api_status_labels["js"].setText("☑ JavaScript API — OK");self.map_controller.apply_state(self._filtered_organizations(), fit_viewport=True)
     def apply_map(self):
         if not self.map_ready:return
         cities=self.settings.get("cities",[]);self.map_title.setText("🗺️ Карта — "+", ".join(c.get("name","") for c in cities));self.map_controller.apply_state(self._filtered_organizations())
-    def update_map_for_selection(self):
-        self.map_controller.fit_after_selection_change(self.org_table)
     def run_health(self):
         cities=self.settings.get("cities",[]);bbox=cities[0].get("bbox","") if cities else "50,53~50.3,53.4";self.health_worker=HealthWorker(self.api,bbox)
         self.health_worker.geocoder.connect(self.on_health_geocoder);self.health_worker.search.connect(self.on_health_search);self.health_worker.start()
@@ -665,8 +662,7 @@ class MainWindow(QMainWindow):
         for b in getattr(self,"_selection_action_buttons",()):
             b.setEnabled(has_selection)
             b.setToolTip("" if has_selection else "Выберите хотя бы одну организацию в списке.")
-        if hasattr(self,"_selection_map_timer"):
-            (self._selection_map_timer.stop() if getattr(self,"_suppress_selection_map_fit",False) else self._selection_map_timer.start(50));self.map_controller.sync_selection(self.org_table)
+        self.map_controller.sync_selection(self.org_table)
     def crm_changed(self,item):
         if self._updating_table or item.column() not in (OrgColumn.STATUS,OrgColumn.COMMENT,OrgColumn.RESPONSIBLE,OrgColumn.NEXT_CONTACT):return
         oid=self.org_table.item(item.row(),0).data(Qt.ItemDataRole.UserRole);fields={OrgColumn.STATUS:"status",OrgColumn.COMMENT:"comment",OrgColumn.RESPONSIBLE:"responsible",OrgColumn.NEXT_CONTACT:"next_contact_date"}

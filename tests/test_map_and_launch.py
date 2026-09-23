@@ -9,10 +9,10 @@ class MapAndLaunchStaticTests(unittest.TestCase):
         text = (ROOT / "yabiztracker" / "map.html").read_text(encoding="utf-8")
         self.assertIn("function setMapLocations(cities)", text)
         self.assertIn("cityPoints", text)
-        self.assertIn("function setMapState(cities,organizations,periodDays)", text)
+        self.assertIn("function setMapState(cities,organizations,periodDays,fitViewport)", text)
         self.assertIn("function fitToSettlements(cities)", text)
         self.assertIn("function fitOnOrganizations(organizations)", text)
-        self.assertIn("myMap.setCenter(points[0],15", text)
+        self.assertNotIn("setCenter([lat,lon],15", text)
         self.assertIn("window.pendingMapCities", text)
         self.assertIn("applyPendingMapCities", text)
 
@@ -39,10 +39,13 @@ class MapViewportContractTests(unittest.TestCase):
         text = (ROOT / "yabiztracker" / "ui" / "main_window.py").read_text(encoding="utf-8")
         self.assertNotIn("on_health_search", text[text.index("def on_map_ready"):text.index("def run_health")])
 
-    def test_selection_fit_is_explicitly_debounced(self):
-        text = (ROOT / "yabiztracker" / "ui" / "main_window.py").read_text(encoding="utf-8")
-        self.assertIn("self._selection_map_timer.start(50)", text)
-        self.assertIn("fit_after_selection_change", (ROOT / "yabiztracker" / "services" / "map_controller.py").read_text(encoding="utf-8"))
+    def test_selection_never_changes_map_viewport(self):
+        ui = (ROOT / "yabiztracker" / "ui" / "main_window.py").read_text(encoding="utf-8")
+        controller = (ROOT / "yabiztracker" / "services" / "map_controller.py").read_text(encoding="utf-8")
+        self.assertNotIn("_selection_map_timer", ui)
+        self.assertNotIn("fitOnOrganizations(", ui)
+        self.assertIn("def fit_after_selection_change", controller)
+        self.assertIn("selection must never move the map viewport", controller)
 
     def test_map_marker_colors_use_monitoring_period_and_selection_is_persistent(self):
         text = (ROOT / "yabiztracker" / "map.html").read_text(encoding="utf-8")
@@ -72,6 +75,15 @@ class V111MapContractTests(unittest.TestCase):
         assert "zIndex:selected?10000:100" in text
         assert "def onMarkerClicked" in bridge
 
+
+    def test_map_updates_preserve_viewport_except_initial_map_ready(self):
+        ui = (ROOT / "yabiztracker" / "ui" / "main_window.py").read_text(encoding="utf-8")
+        controller = (ROOT / "yabiztracker" / "services" / "map_controller.py").read_text(encoding="utf-8")
+        map_text = (ROOT / "yabiztracker" / "map.html").read_text(encoding="utf-8")
+        self.assertIn("apply_state(self._filtered_organizations(), fit_viewport=True)", ui)
+        self.assertIn("apply_state(self._filtered_organizations())", ui)
+        self.assertIn("fit_viewport: bool = False", controller)
+        self.assertIn("if(fitViewport&&points.length)_stableSettlementFit(points);", map_text)
 
     def test_marker_click_has_explicit_hit_shape_local_selection_and_bridge_fallback(self):
         text = (ROOT / "yabiztracker" / "map.html").read_text(encoding="utf-8")
@@ -108,25 +120,3 @@ class V111MapContractTests(unittest.TestCase):
         assert (ROOT / "VERSION").read_text(encoding="utf-8").strip() == "1.1.1"
         assert 'version = "1.1.1"' in (ROOT / "pyproject.toml").read_text(encoding="utf-8")
         assert '__version__="1.1.1"' in (ROOT / "yabiztracker" / "__init__.py").read_text(encoding="utf-8")
-
-class MarkerClickViewportTests(unittest.TestCase):
-    def test_marker_click_does_not_schedule_map_viewport_fit(self):
-        text = (ROOT / "yabiztracker" / "ui" / "main_window.py").read_text(encoding="utf-8")
-        start = text.index("    def marker_selected(self,oid):")
-        end = text.index("    def on_map_ready(self):", start)
-        block = text[start:end]
-        assert "self._selection_map_timer.stop()" in block
-        assert "self._suppress_selection_map_fit=True" in block
-        assert "self.org_table.scrollToItem(it)" in block
-        assert "fit_after_selection_change" not in block
-        assert "fitOnOrganizations" not in block
-
-    def test_selection_changed_suppresses_fit_during_marker_click(self):
-        text = (ROOT / "yabiztracker" / "ui" / "main_window.py").read_text(encoding="utf-8")
-        start = text.index("    def selection_changed(self):")
-        end = text.index("    def crm_changed", start)
-        block = text[start:end]
-        assert "_suppress_selection_map_fit" in block
-        assert "self._selection_map_timer.stop()" in block
-        assert "self._selection_map_timer.start(50)" in block
-        assert "self.map_controller.sync_selection(self.org_table)" in block

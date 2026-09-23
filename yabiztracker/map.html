@@ -31,7 +31,7 @@ function updateMarkers(os,periodDays){
  });
 }
 function setSelectedMarkers(ids){selectedMarkerIds=new Set((ids||[]).map(String));Object.keys(markers).forEach(id=>{let m=markers[id];let selected=selectedMarkerIds.has(String(id));applyMarkerVisual(m,selected)})}
-function centerOnOrg(id,lat,lon){if(!myMap)return;myMap.setCenter([lat,lon],15,{duration:500,checkZoomRange:true});setSelectedMarkers([id])}
+function centerOnOrg(id,lat,lon){if(!myMap)return;setSelectedMarkers([id])}
 function parseBbox(b){try{let p=b.split('~').map(x=>x.split(',').map(Number));return [[p[0][1],p[0][0]],[p[1][1],p[1][0]]]}catch(e){return null}}
 function _clearCityObjects(){
  cityObjects.forEach(x=>{try{myMap.geoObjects.remove(x)}catch(e){}});cityObjects=[];
@@ -96,27 +96,18 @@ function setMapLocations(cities){
  if(!myMap){window.pendingMapCities=cities||[];return;}
  fitToSettlements(cities||[]);
 }
-function setMapState(cities,organizations,periodDays){
+function setMapState(cities,organizations,periodDays,fitViewport){
  if(!myMap){window.pendingMapCities=cities||[];window.pendingMapOrganizations=organizations||[];window.pendingMapPeriodDays=periodDays||30;return;}
  currentPeriodDays=Math.max(1,Number(periodDays)||30);
  const points=_addCityObjects(cities||[]);
  updateMarkers(organizations||[],periodDays||30);
- if(points.length)_stableSettlementFit(points);
+ if(fitViewport&&points.length)_stableSettlementFit(points);
 }
 function fitOnOrganizations(organizations){
- if(!myMap){window.pendingMapSelection=organizations||[];return;}
- const points=(organizations||[]).map(o=>[Number(o.latitude),Number(o.longitude)]).filter(p=>Number.isFinite(p[0])&&Number.isFinite(p[1]));
- if(!points.length)return;
- const token=++viewportToken;
- lastViewport={kind:"organizations",points:points.slice()};
- const apply=()=>{
-   if(!myMap||token!==viewportToken)return;
-   try{myMap.container.fitToViewport()}catch(e){}
-   if(points.length===1)myMap.setCenter(points[0],15,{duration:0,checkZoomRange:true});
-   else _fitPoints(points,9,17,80);
- };
- apply();
- [120,350,800].forEach(ms=>setTimeout(apply,ms));
+ // Kept as a compatibility API, but organization selection must never
+ // change the user's map viewport. Only marker styling is synchronized.
+ const ids=(organizations||[]).map(o=>String(o.id));
+ setSelectedMarkers(ids);
 }
 function applyPendingMapCities(){
  if(!myMap)return;
@@ -151,8 +142,6 @@ window.addEventListener('resize',()=>{
    if(!myMap||!lastViewport)return;
    try{myMap.container.fitToViewport()}catch(e){}
    if(vp.kind==='settlements')_fitPoints(vp.points,7,12,60);
-   else if(vp.points.length===1)myMap.setCenter(vp.points[0],15,{duration:0,checkZoomRange:true});
-   else _fitPoints(vp.points,9,17,80);
  },80);
 });
 window.addEventListener('load',init);
