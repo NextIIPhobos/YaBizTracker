@@ -95,3 +95,10 @@ class ApiConcurrencyTests(unittest.TestCase):
         for thread in threads: thread.join()
         self.assertEqual(len(sessions), 8)
         self.assertEqual(len({id(session) for session in sessions}), 8)
+
+
+def test_resolve_organization_uses_org_uri():
+    from yabiztracker.api.yandex import YandexSearchClient
+    c=YandexSearchClient("key")
+    c.resolve_uri=lambda uri: [uri]
+    assert c.resolve_organization("123") == ["ymapsbm1://org?oid=123"]

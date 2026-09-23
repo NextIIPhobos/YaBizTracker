@@ -7,7 +7,7 @@ from ..domain.models import STATUS_OPTIONS
 from ..domain.filters import excluded_category_match, organization_categories, normalize_category
 from ..domain.email import merge_emails
 
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 
 class Database:
     def __init__(self, db_path="organizations.db"):
@@ -146,6 +146,11 @@ class Database:
                 CREATE INDEX IF NOT EXISTS idx_org_cat_obs_lookup
                   ON organization_category_observations(city_name, search_category, org_id);
                 """)
+            if v < 10:
+                # Social links are stored in the existing social_links JSON column;
+                # v10 adds no physical columns and only records the schema level.
+                pass
+
             self.conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
             self.conn.commit()
 
@@ -465,6 +470,41 @@ class Database:
                 self.conn.commit(); return True
             except Exception:
                 self.conn.rollback(); raise
+
+    def update_organization_social_links(self, org_id, discovered_links):
+        """Merge discovered social URLs into an organization without overwriting existing links."""
+        now = datetime.now().isoformat(timespec="seconds")
+        import json as _json
+        with self._lock:
+            row = self.conn.execute("SELECT social_links FROM organizations WHERE org_id=?", (str(org_id),)).fetchone()
+            if not row:
+                return False
+            try:
+                old_data = _json.loads(row[0] or "{}")
+            except Exception:
+                old_data = {}
+            if not isinstance(old_data, dict):
+                old_data = {}
+            merged = {}
+            for k, v in old_data.items():
+                vals = v if isinstance(v, list) else [v]
+                merged[k] = [str(x) for x in vals if str(x or "").strip()]
+            for k, vals in (discovered_links or {}).items():
+                if not isinstance(vals, list): vals = [vals]
+                target = merged.setdefault(str(k), [])
+                for url in vals:
+                    url = str(url or "").strip()
+                    if url and url not in target:
+                        target.append(url)
+            merged = {k: v for k, v in merged.items() if v}
+            new_value = _json.dumps(merged, ensure_ascii=False, sort_keys=True)
+            old_value = str(row[0] or "{}")
+            if old_value != new_value:
+                self.conn.execute("UPDATE organizations SET social_links=?, last_updated=? WHERE org_id=?", (new_value, now, str(org_id)))
+                self.conn.execute("INSERT INTO organization_history(org_id,changed_at,field,old_value,new_value) VALUES(?,?,?,?,?)", (str(org_id), now, "social_links", old_value, new_value))
+                self.conn.commit()
+                return True
+            return False
 
     def get_trash(self, filters=None):
         filters=filters or {}

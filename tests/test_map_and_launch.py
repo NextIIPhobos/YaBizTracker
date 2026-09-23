@@ -117,6 +117,6 @@ class V111MapContractTests(unittest.TestCase):
         assert "append_missing_categories" in service
 
     def test_version_is_111_everywhere_core(self):
-        assert (ROOT / "VERSION").read_text(encoding="utf-8").strip() == "1.1.1"
-        assert 'version = "1.1.1"' in (ROOT / "pyproject.toml").read_text(encoding="utf-8")
-        assert '__version__="1.1.1"' in (ROOT / "yabiztracker" / "__init__.py").read_text(encoding="utf-8")
+        assert (ROOT / "VERSION").read_text(encoding="utf-8").strip() == "1.1.2"
+        assert 'version = "1.1.2"' in (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+        assert '__version__="1.1.2"' in (ROOT / "yabiztracker" / "__init__.py").read_text(encoding="utf-8")

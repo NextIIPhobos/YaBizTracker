@@ -1,3 +1,11 @@
+# YaBizTracker 1.1.2
+
+- Расширен разбор социальных ссылок из ответов Яндекс API.
+- Добавлен веб-поиск социальных сетей по официальному сайту организации.
+- Добавлена команда «Помощь → Ручной поиск соц. сетей» для всех организаций базы.
+- Добавлены VK, Telegram, MAX, OK, Instagram, Facebook, YouTube, Rutube, Dzen, TikTok, Threads, X/Twitter, LinkedIn, Pinterest, TenChat, VC.ru, Reddit, Twitch, Discord и Patreon.
+- Результаты объединяются с уже найденными ссылками без потери существующих данных.
+
 # Release checklist
 
 ## Русская версия

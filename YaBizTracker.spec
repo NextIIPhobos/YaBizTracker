@@ -1,4 +1,4 @@
-# PyInstaller spec for YaBizTracker 1.1.1
+# PyInstaller spec for YaBizTracker 1.1.2
 # QtWebEngine needs not only Python hidden imports, but also its native
 # process, DLLs and resource files (resources.pak, locales, etc.).
 from PyInstaller.utils.hooks import collect_all, collect_submodules

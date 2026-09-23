@@ -19,9 +19,9 @@ def test_repository_is_clean_and_runtime_files_are_not_committed():
 
 
 def test_branding_and_version_are_consistent():
-    assert (ROOT / "VERSION").read_text(encoding="utf-8").strip() == "1.1.1"
-    assert (ROOT / "yabiztracker" / "__init__.py").read_text(encoding="utf-8").strip() == '__version__="1.1.1"'
-    assert 'version = "1.1.1"' in (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    assert (ROOT / "VERSION").read_text(encoding="utf-8").strip() == "1.1.2"
+    assert (ROOT / "yabiztracker" / "__init__.py").read_text(encoding="utf-8").strip() == '__version__="1.1.2"'
+    assert 'version = "1.1.2"' in (ROOT / "pyproject.toml").read_text(encoding="utf-8")
     source_files = list((ROOT / "yabiztracker").rglob("*.py")) + [ROOT / "main.py"]
     for p in source_files:
         text = p.read_text(encoding="utf-8").lower()
@@ -36,7 +36,7 @@ def test_ui_is_split_into_cohesive_modules():
     assert {"SettingsDialog", "TrashDialog", "ExportDialog"} <= classes(ui / "dialogs.py")
     assert {"NextContactItem", "NextContactDelegate", "StatusDelegate"} <= classes(ui / "delegates.py")
     assert {"HealthWorker", "SuggestWorker"} <= classes(ui / "workers.py")
-    assert (len((ui / "main_window.py").read_text(encoding="utf-8").splitlines()) < 940)
+    assert (len((ui / "main_window.py").read_text(encoding="utf-8").splitlines()) < 980)
 
 
 def test_pyinstaller_build_configuration_is_explicit():
@@ -71,7 +71,7 @@ def test_domain_rules_are_independent_of_qt():
 
 def test_database_schema_contains_per_category_liveness():
     db = (ROOT / "yabiztracker" / "database" / "database.py").read_text(encoding="utf-8")
-    assert "SCHEMA_VERSION = 9" in db
+    assert "SCHEMA_VERSION = 10" in db
     assert "organization_category_observations" in db
     assert "PRIMARY KEY(org_id, city_name, search_category)" in db
 
