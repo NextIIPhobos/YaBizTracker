@@ -108,3 +108,25 @@ class V111MapContractTests(unittest.TestCase):
         assert (ROOT / "VERSION").read_text(encoding="utf-8").strip() == "1.1.1"
         assert 'version = "1.1.1"' in (ROOT / "pyproject.toml").read_text(encoding="utf-8")
         assert '__version__="1.1.1"' in (ROOT / "yabiztracker" / "__init__.py").read_text(encoding="utf-8")
+
+class MarkerClickViewportTests(unittest.TestCase):
+    def test_marker_click_does_not_schedule_map_viewport_fit(self):
+        text = (ROOT / "yabiztracker" / "ui" / "main_window.py").read_text(encoding="utf-8")
+        start = text.index("    def marker_selected(self,oid):")
+        end = text.index("    def on_map_ready(self):", start)
+        block = text[start:end]
+        assert "self._selection_map_timer.stop()" in block
+        assert "self._suppress_selection_map_fit=True" in block
+        assert "self.org_table.scrollToItem(it)" in block
+        assert "fit_after_selection_change" not in block
+        assert "fitOnOrganizations" not in block
+
+    def test_selection_changed_suppresses_fit_during_marker_click(self):
+        text = (ROOT / "yabiztracker" / "ui" / "main_window.py").read_text(encoding="utf-8")
+        start = text.index("    def selection_changed(self):")
+        end = text.index("    def crm_changed", start)
+        block = text[start:end]
+        assert "_suppress_selection_map_fit" in block
+        assert "self._selection_map_timer.stop()" in block
+        assert "self._selection_map_timer.start(50)" in block
+        assert "self.map_controller.sync_selection(self.org_table)" in block

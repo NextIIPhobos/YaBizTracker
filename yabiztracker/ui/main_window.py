@@ -259,18 +259,18 @@ class MainWindow(QMainWindow):
         self.logger.log_general("ERROR",msg)
     def marker_selected(self,oid):
         target=str(oid)
+        if hasattr(self,"_selection_map_timer"): self._selection_map_timer.stop()
+        self._suppress_selection_map_fit=True;row=None
         for r in range(self.org_table.rowCount()):
             it=self.org_table.item(r,OrgColumn.NAME)
-            if not it or str(it.data(Qt.ItemDataRole.UserRole))!=target:
-                continue
-            if self.org_table.isRowHidden(r):
-                self.logger.log_general("WARNING",f"Клик по маркеру организации {target}, отсутствующей в текущем фильтре")
-                return
-            self.org_table.setCurrentCell(r,OrgColumn.NAME,QItemSelectionModel.SelectionFlag.ClearAndSelect|QItemSelectionModel.SelectionFlag.Rows)
-            self.org_table.scrollToItem(it)
-            self.selection_changed()
-            return
-        self.logger.log_general("WARNING",f"Не удалось найти организацию для маркера: {target}")
+            if it and str(it.data(Qt.ItemDataRole.UserRole))==target: row=(r,it);break
+        if row and not self.org_table.isRowHidden(row[0]):
+            r,it=row;self.org_table.setCurrentCell(r,OrgColumn.NAME,QItemSelectionModel.SelectionFlag.ClearAndSelect|QItemSelectionModel.SelectionFlag.Rows);self.org_table.scrollToItem(it);self.selection_changed()
+        elif row:
+            self.logger.log_general("WARNING",f"Клик по маркеру организации {target}, отсутствующей в текущем фильтре")
+        else:
+            self.logger.log_general("WARNING",f"Не удалось найти организацию для маркера: {target}")
+        self._suppress_selection_map_fit=False
     def on_map_ready(self):
         self.map_ready=True;self.api_status_labels["js"].setText("☑ JavaScript API — OK");self.map_controller.apply_state(self._filtered_organizations())
     def apply_map(self):
@@ -665,7 +665,8 @@ class MainWindow(QMainWindow):
         for b in getattr(self,"_selection_action_buttons",()):
             b.setEnabled(has_selection)
             b.setToolTip("" if has_selection else "Выберите хотя бы одну организацию в списке.")
-        if hasattr(self,"_selection_map_timer"): self._selection_map_timer.start(50);self.map_controller.sync_selection(self.org_table)
+        if hasattr(self,"_selection_map_timer"):
+            (self._selection_map_timer.stop() if getattr(self,"_suppress_selection_map_fit",False) else self._selection_map_timer.start(50));self.map_controller.sync_selection(self.org_table)
     def crm_changed(self,item):
         if self._updating_table or item.column() not in (OrgColumn.STATUS,OrgColumn.COMMENT,OrgColumn.RESPONSIBLE,OrgColumn.NEXT_CONTACT):return
         oid=self.org_table.item(item.row(),0).data(Qt.ItemDataRole.UserRole);fields={OrgColumn.STATUS:"status",OrgColumn.COMMENT:"comment",OrgColumn.RESPONSIBLE:"responsible",OrgColumn.NEXT_CONTACT:"next_contact_date"}
