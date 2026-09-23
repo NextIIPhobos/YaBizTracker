@@ -101,3 +101,27 @@ def categories_to_activities(categories) -> dict[str, str]:
         groups.setdefault(group, []).append(category)
     order = ["А","Б","В","Г","Д","Е","Ж","З","И, Й","К","Л","М","Н","О","П","Р","С","Т","У","Ф","Х","Ц","Ч","Ш","Э","Ю","Я","Другое"]
     return {group: "|".join(groups[group]) for group in order if group in groups}
+
+
+def append_missing_categories(path: str, categories) -> list[str]:
+    """Append categories absent from the user catalog using normalized comparison.
+
+    The original spelling from the first observed organization is preserved;
+    only whitespace and duplicates according to ``ё/е`` + casefold normalization
+    are collapsed. Returns the categories that were actually added.
+    """
+    existing = load_categories_file(path)
+    existing_keys = {_category_key(x) for x in existing}
+    additions = []
+    for value in categories or []:
+        text = str(value or "").strip()
+        if not text or text.startswith("#"):
+            continue
+        key = _category_key(text)
+        if key not in existing_keys:
+            existing.append(text)
+            existing_keys.add(key)
+            additions.append(text)
+    if additions:
+        write_categories_file(path, existing)
+    return additions

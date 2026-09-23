@@ -4,7 +4,6 @@ import json
 from typing import Any, Callable
 
 from PyQt6.QtCore import QTimer, Qt
-from ..domain.filters import matches_organization_filters
 
 
 class MapController:
@@ -26,15 +25,20 @@ class MapController:
         if self.is_ready():
             self.webview.page().runJavaScript(expression)
 
-    def apply_state(self, category_names=None) -> None:
+    def apply_state(self, organizations=None) -> None:
         if not self.is_ready():
             return
         cities = self.settings.get("cities", [])
-        names = [c.get("name", "") for c in cities]
-        orgs = self.db.get_active_organizations(names, self.settings.get("period_days", 30))
-        if category_names is not None:
-            orgs = [org for org in orgs if matches_organization_filters(org, {"category_names": category_names})]
-        self._js(f"setMapState({json.dumps(cities, ensure_ascii=False)},{json.dumps(orgs, ensure_ascii=False)},{int(self.settings.get('period_days', 30))});")
+        if organizations is None:
+            names = [c.get("name", "") for c in cities]
+            organizations = self.db.get_active_organizations(
+                names, self.settings.get("period_days", 30)
+            )
+        self._js(
+            f"setMapState({json.dumps(cities, ensure_ascii=False)},"
+            f"{json.dumps(organizations, ensure_ascii=False)},"
+            f"{int(self.settings.get('period_days', 30))});"
+        )
 
     def fit_settlements(self) -> None:
         if not self.is_ready():

@@ -52,6 +52,19 @@ class CheckableDropdownTests(unittest.TestCase):
         self.assertGreater(widget._scroll.maximumHeight(), 0)
         self.assertLessEqual(widget._popup.maximumHeight(), widget.screen().availableGeometry().height())
 
+    def test_checkbox_changes_commit_only_when_popup_closes(self):
+        widget = CheckableDropdown("Категории")
+        widget.set_items(["Кафе", "Квесты"])
+        commits = []
+        widget.committed.connect(lambda: commits.append(True))
+        widget._popup.show()
+        self.app.processEvents()
+        widget._items["Кафе"].setChecked(False)
+        self.assertEqual(commits, [])
+        widget._popup.hide()
+        self.app.processEvents()
+        self.assertEqual(commits, [True])
+
     def test_refresh_drops_stale_settlement_values(self):
         widget = CheckableDropdown("Населённый пункт")
         widget.set_items(["Самара", "Тольятти"])
@@ -80,8 +93,13 @@ class ColumnVisibilityPopupTests(unittest.TestCase):
         popup = ColumnVisibilityPopup(["Название", "E-mail"])
         changes = []
         popup.visibility_changed.connect(lambda column, visible: changes.append((column, visible)))
+        popup.show()
+        self.app.processEvents()
         popup.checkbox(1).setChecked(False)
         self.assertFalse(popup.is_column_visible(1))
+        self.assertEqual(changes, [])
+        popup.hide()
+        self.app.processEvents()
         self.assertEqual(changes, [(1, False)])
         self.assertTrue(popup.checkbox(0).isChecked())
 

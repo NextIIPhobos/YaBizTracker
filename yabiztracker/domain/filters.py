@@ -95,9 +95,20 @@ def matches_organization_filters(org: Mapping, filters: Mapping | None = None) -
             if wanted not in organization_categories(org):
                 return False
 
-    status = str(filters.get("status") or "")
-    if status and str(org.get("status") or "") != status:
-        return False
+    if "status_names" in filters:
+        selected_statuses = {
+            str(value).strip()
+            for value in (filters.get("status_names") or [])
+            if str(value).strip()
+        }
+        if not selected_statuses:
+            return False
+        if str(org.get("status") or "").strip() not in selected_statuses:
+            return False
+    else:
+        status = str(filters.get("status") or "")
+        if status and str(org.get("status") or "") != status:
+            return False
 
     selected_cities = {
         str(value).strip().casefold()

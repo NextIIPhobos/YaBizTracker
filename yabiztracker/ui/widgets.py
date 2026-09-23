@@ -48,6 +48,14 @@ class PresenceFilterButton(QPushButton):
         }[self._mode])
 
 
+class _CheckablePopup(QFrame):
+    closed = pyqtSignal()
+
+    def hideEvent(self, event):
+        super().hideEvent(event)
+        self.closed.emit()
+
+
 class CheckableDropdown(QWidget):
     """Responsive multi-select popup with searchable checkbox list.
 
@@ -58,6 +66,7 @@ class CheckableDropdown(QWidget):
     """
 
     changed = pyqtSignal()
+    committed = pyqtSignal()
 
     def __init__(self, title="Выбор", parent=None):
         super().__init__(parent)
@@ -68,6 +77,7 @@ class CheckableDropdown(QWidget):
         self._list_widget = None
         self._scroll = None
         self._values: list[str] = []
+        self._dirty = False
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -98,7 +108,7 @@ class CheckableDropdown(QWidget):
             self._popup.deleteLater()
             self._popup = None
 
-        popup = QFrame(self, Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint)
+        popup = _CheckablePopup(self, Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint)
         popup.setFrameShape(QFrame.Shape.StyledPanel)
         popup.setMinimumWidth(max(260, self.width(), 320 if len(normalized) > 30 else 0))
         popup.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
@@ -152,7 +162,9 @@ class CheckableDropdown(QWidget):
         none_btn.clicked.connect(lambda: self._set_all(False))
         search.textChanged.connect(self._filter_items)
 
+        popup.closed.connect(self._popup_closed)
         self._popup = popup
+        self._dirty = False
         self._update_button()
         self._resize_popup_to_screen()
 
@@ -205,11 +217,18 @@ class CheckableDropdown(QWidget):
             cb.setChecked(checked)
             cb.blockSignals(False)
         self._update_button()
+        self._dirty = True
         self.changed.emit()
 
     def _on_state_changed(self, _state):
         self._update_button()
+        self._dirty = True
         self.changed.emit()
+
+    def _popup_closed(self):
+        if self._dirty:
+            self._dirty = False
+            self.committed.emit()
 
     def _update_button(self):
         selected = self.checked_values()
@@ -240,6 +259,7 @@ class ColumnVisibilityPopup(QFrame):
     """
 
     visibility_changed = pyqtSignal(int, bool)
+    committed = pyqtSignal()
 
     def __init__(self, headers, parent=None):
         super().__init__(parent, Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint)
@@ -247,6 +267,8 @@ class ColumnVisibilityPopup(QFrame):
         self.setObjectName("columnVisibilityPopup")
         self.setMinimumWidth(280)
         self._checkboxes: dict[int, QCheckBox] = {}
+        self._dirty = False
+        self._applied: dict[int, bool] = {}
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(10, 10, 10, 10)
@@ -267,12 +289,27 @@ class ColumnVisibilityPopup(QFrame):
         for column, header in enumerate(headers):
             checkbox = QCheckBox(str(header))
             checkbox.setChecked(True)
-            checkbox.toggled.connect(lambda checked, c=column: self.visibility_changed.emit(c, checked))
+            checkbox.toggled.connect(lambda checked, c=column: self._changed(c, checked))
             self._checkboxes[column] = checkbox
+            self._applied[column] = True
             list_layout.addWidget(checkbox)
 
         scroll.setWidget(list_widget)
         outer.addWidget(scroll)
+
+    def _changed(self, column: int, checked: bool):
+        self._dirty = True
+
+    def hideEvent(self, event):
+        super().hideEvent(event)
+        if self._dirty:
+            self._dirty = False
+            changes = [(column, checkbox.isChecked()) for column, checkbox in self._checkboxes.items()
+                       if checkbox.isChecked() != self._applied.get(column, True)]
+            for column, visible in changes:
+                self._applied[column] = visible
+                self.visibility_changed.emit(column, visible)
+            self.committed.emit()
 
     def checkbox(self, column: int):
         return self._checkboxes[column]

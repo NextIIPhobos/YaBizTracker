@@ -19,9 +19,9 @@ def test_repository_is_clean_and_runtime_files_are_not_committed():
 
 
 def test_branding_and_version_are_consistent():
-    assert (ROOT / "VERSION").read_text(encoding="utf-8").strip() == "1.1.0"
-    assert (ROOT / "yabiztracker" / "__init__.py").read_text(encoding="utf-8").strip() == '__version__="1.1.0"'
-    assert 'version = "1.1.0"' in (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    assert (ROOT / "VERSION").read_text(encoding="utf-8").strip() == "1.1.1"
+    assert (ROOT / "yabiztracker" / "__init__.py").read_text(encoding="utf-8").strip() == '__version__="1.1.1"'
+    assert 'version = "1.1.1"' in (ROOT / "pyproject.toml").read_text(encoding="utf-8")
     source_files = list((ROOT / "yabiztracker").rglob("*.py")) + [ROOT / "main.py"]
     for p in source_files:
         text = p.read_text(encoding="utf-8").lower()
@@ -167,14 +167,15 @@ def test_category_catalog_is_user_editable_and_runtime_generated():
     assert "_check_categories_file" in dialogs
 
 
-def test_category_filter_controls_map_markers():
+def test_all_list_filters_drive_map_from_the_same_visible_rows():
     ui = (ROOT / "yabiztracker" / "ui" / "main_window.py").read_text(encoding="utf-8")
     controller = (ROOT / "yabiztracker" / "services" / "map_controller.py").read_text(encoding="utf-8")
-    assert "on_category_filter_changed" in ui
-    assert "apply_map()" in ui
-    assert 'matches_organization_filters(org, {"category_names": category_names})' in controller
-    assert "category_filter" in ui
+    assert "def _filtered_organizations" in ui
+    assert "self.map_controller.apply_state(self._filtered_organizations())" in ui
     assert 'CheckableDropdown("Категории")' in ui
+    assert 'CheckableDropdown("Статусы")' in ui
+    assert 'CheckableDropdown("Населённый пункт")' in ui
+    assert "organizations=None" in controller
 
 
 def test_settings_contains_safe_cleanup_actions():

@@ -59,3 +59,52 @@ class MapViewportContractTests(unittest.TestCase):
         self.assertIn("period_days", text)
         self.assertIn("def sync_selection(self, table)", text)
         self.assertIn("setSelectedMarkers", text)
+
+
+class V111MapContractTests(unittest.TestCase):
+    def test_marker_click_bridge_and_selected_visual_contract(self):
+        text = (ROOT / "yabiztracker" / "map.html").read_text(encoding="utf-8")
+        bridge = (ROOT / "yabiztracker" / "bridge.py").read_text(encoding="utf-8")
+        assert "m.events.add('click'" in text
+        assert "onMarkerClicked(key)" in text
+        assert "markerLayouts.selected" in text
+        assert "selected?" in text and "m.properties.set('markerColor',selected?'#FF0000'" in text
+        assert "zIndex:selected?10000:100" in text
+        assert "def onMarkerClicked" in bridge
+
+
+    def test_marker_click_has_explicit_hit_shape_local_selection_and_bridge_fallback(self):
+        text = (ROOT / "yabiztracker" / "map.html").read_text(encoding="utf-8")
+        ui = (ROOT / "yabiztracker" / "ui" / "main_window.py").read_text(encoding="utf-8")
+        assert "function notifyMarkerClicked(id)" in text
+        assert "window.bridge" in text
+        assert "iconShape:{type:'Circle'" in text
+        assert "selectedMarkerIds=new Set([key])" in text
+        assert "return false" in text
+        assert "setCurrentCell(r,OrgColumn.NAME" in ui
+        assert "SelectionFlag.ClearAndSelect|QItemSelectionModel.SelectionFlag.Rows" in ui
+
+    def test_map_state_is_sent_from_filtered_table_rows(self):
+        ui = (ROOT / "yabiztracker" / "ui" / "main_window.py").read_text(encoding="utf-8")
+        assert "def _filtered_organizations" in ui
+        assert "self.map_controller.apply_state(self._filtered_organizations())" in ui
+
+    def test_status_is_multiselect_and_checkbox_filters_are_committed(self):
+        ui = (ROOT / "yabiztracker" / "ui" / "main_window.py").read_text(encoding="utf-8")
+        widgets = (ROOT / "yabiztracker" / "ui" / "widgets.py").read_text(encoding="utf-8")
+        assert 'CheckableDropdown("Статусы")' in ui
+        assert "committed.connect(self.on_checkbox_filters_committed)" in ui
+        assert "popup.closed.connect(self._popup_closed)" in widgets
+        assert "self._dirty = True" in widgets
+
+    def test_category_catalog_sync_is_wired_after_scan_and_to_help(self):
+        ui = (ROOT / "yabiztracker" / "ui" / "main_window.py").read_text(encoding="utf-8")
+        service = (ROOT / "yabiztracker" / "services" / "category_catalog.py").read_text(encoding="utf-8")
+        assert 'Проверка доступных категорий' in ui
+        assert "self.check_available_categories(log_only=True)" in ui
+        assert "append_missing_categories" in service
+
+    def test_version_is_111_everywhere_core(self):
+        assert (ROOT / "VERSION").read_text(encoding="utf-8").strip() == "1.1.1"
+        assert 'version = "1.1.1"' in (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+        assert '__version__="1.1.1"' in (ROOT / "yabiztracker" / "__init__.py").read_text(encoding="utf-8")

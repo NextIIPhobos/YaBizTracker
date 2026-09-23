@@ -5,13 +5,31 @@
 let myMap=null,markers={},webChannel=null,cityObjects=[],markerLayouts={},currentPeriodDays=30,selectedMarkerIds=new Set(),viewportToken=0,lastViewport=null;
 const COLORS={fresh:'#00C800',recent:'#FFD700',medium:'#00BFFF',old:'#969696'};
 function markerColor(age,periodDays){age=Math.max(0,Number(age)||0);const days=Math.max(1,Number(periodDays)||30),t=Math.min(1,age/days);if(t<=1/3)return lerp(COLORS.fresh,COLORS.recent,t*3);if(t<=2/3)return lerp(COLORS.recent,COLORS.medium,(t-1/3)*3);return lerp(COLORS.medium,COLORS.old,(t-2/3)*3)}
-function ensureMarkerLayouts(){if(markerLayouts.normal)return;markerLayouts.normal=ymaps.templateLayoutFactory.createClass('<div style="width:10px;height:10px;border-radius:50%;background:$[properties.markerColor];border:1px solid rgba(255,255,255,.9);box-sizing:border-box;"></div>');markerLayouts.selected=ymaps.templateLayoutFactory.createClass('<div style="width:18px;height:18px;border-radius:50%;background:$[properties.markerColor];border:2px solid #fff;box-shadow:0 0 0 2px rgba(255,0,0,.55),0 2px 6px rgba(0,0,0,.45);box-sizing:border-box;"></div>')}
+function ensureMarkerLayouts(){if(markerLayouts.normal)return;markerLayouts.normal=ymaps.templateLayoutFactory.createClass('<div style="width:12px;height:12px;border-radius:50%;background:$[properties.markerColor];border:1px solid rgba(255,255,255,.95);box-sizing:border-box;cursor:pointer;"></div>');markerLayouts.selected=ymaps.templateLayoutFactory.createClass('<div style="width:20px;height:20px;border-radius:50%;background:$[properties.markerColor];border:2px solid #fff;box-shadow:0 0 0 2px rgba(255,0,0,.55),0 2px 6px rgba(0,0,0,.45);box-sizing:border-box;cursor:pointer;"></div>')}
 function applyMarkerVisual(m,selected){if(!m)return;ensureMarkerLayouts();m.properties.set('markerColor',selected?'#FF0000':markerColor(m.properties.get('ageDays'),currentPeriodDays));m.options.set({iconLayout:selected?markerLayouts.selected:markerLayouts.normal,zIndex:selected?10000:100});}
 function lerp(a,b,t){let A=parseInt(a.slice(1),16),B=parseInt(b.slice(1),16),ar=A>>16,ag=(A>>8)&255,ab=A&255,br=B>>16,bg=(B>>8)&255,bb=B&255,r=Math.round(ar+(br-ar)*t),g=Math.round(ag+(bg-ag)*t),bl=Math.round(ab+(bb-ab)*t);return '#'+((1<<24)|(r<<16)|(g<<8)|bl).toString(16).slice(1)}
-function addMarker(o){if(!myMap)return;if(markers[o.id])myMap.geoObjects.remove(markers[o.id]);ensureMarkerLayouts();let selected=selectedMarkerIds.has(String(o.id));let m=new ymaps.Placemark([o.latitude,o.longitude],{balloonContentHeader:o.name,balloonContentBody:(o.address||'')+'<br><b>'+((o.category||'')+(o.subcategory?' → '+o.subcategory:''))+'</b>',markerColor:selected?'#FF0000':markerColor(o.age_days,currentPeriodDays),ageDays:Number(o.age_days)||0},{iconLayout:selected?markerLayouts.selected:markerLayouts.normal,zIndex:selected?10000:100});m.events.add('click',e=>{if(webChannel&&webChannel.objects.bridge)webChannel.objects.bridge.onMarkerClicked(String(o.id));e.stopPropagation()});markers[o.id]=m;myMap.geoObjects.add(m)}
+function notifyMarkerClicked(id){const key=String(id);selectedMarkerIds=new Set([key]);const marker=markers[key];if(marker)applyMarkerVisual(marker,true);try{const bridge=window.bridge||(webChannel&&webChannel.objects&&webChannel.objects.bridge);if(bridge&&typeof bridge.onMarkerClicked==='function'){bridge.onMarkerClicked(key);return true}}catch(err){console.error('MapBridge marker click error',err)}return false}
+function addMarker(o){if(!myMap)return;if(markers[o.id])myMap.geoObjects.remove(markers[o.id]);ensureMarkerLayouts();const id=String(o.id);const selected=selectedMarkerIds.has(id);const m=new ymaps.Placemark([Number(o.latitude),Number(o.longitude)],{balloonContentHeader:o.name||'',balloonContentBody:(o.address||'')+'<br><b>'+((o.category||'')+(o.subcategory?' → '+o.subcategory:''))+'</b>',markerColor:selected?'#FF0000':markerColor(o.age_days,currentPeriodDays),ageDays:Number(o.age_days)||0},{iconLayout:selected?markerLayouts.selected:markerLayouts.normal,iconShape:{type:'Circle',coordinates:[0,0],radius:selected?10:6},zIndex:selected?10000:100});m.events.add('click',function(e){notifyMarkerClicked(id);if(e&&typeof e.stopPropagation==='function')e.stopPropagation();return false});markers[id]=m;myMap.geoObjects.add(m)}
 function removeMarker(id){if(markers[id]){myMap.geoObjects.remove(markers[id]);delete markers[id]}}
 function clearAllMarkers(){Object.keys(markers).forEach(removeMarker)}
-function updateMarkers(os,periodDays){if(!myMap)return;currentPeriodDays=Math.max(1,Number(periodDays)||30);clearAllMarkers();(os||[]).forEach(addMarker)}
+function updateMarkers(os,periodDays){
+ if(!myMap)return;
+ currentPeriodDays=Math.max(1,Number(periodDays)||30);
+ const next=new Map((os||[]).map(o=>[String(o.id),o]));
+ Object.keys(markers).forEach(id=>{if(!next.has(String(id)))removeMarker(id)});
+ next.forEach((o,id)=>{
+   const existing=markers[id];
+   if(!existing){addMarker(o);return}
+   const lat=Number(o.latitude),lon=Number(o.longitude);
+   if(Number.isFinite(lat)&&Number.isFinite(lon)) existing.geometry.setCoordinates([lat,lon]);
+   existing.properties.set({
+     balloonContentHeader:o.name||'',
+     balloonContentBody:(o.address||'')+'<br><b>'+((o.category||'')+(o.subcategory?' → '+o.subcategory:''))+'</b>',
+     ageDays:Number(o.age_days)||0
+   });
+   applyMarkerVisual(existing,selectedMarkerIds.has(id));
+ });
+}
 function setSelectedMarkers(ids){selectedMarkerIds=new Set((ids||[]).map(String));Object.keys(markers).forEach(id=>{let m=markers[id];let selected=selectedMarkerIds.has(String(id));applyMarkerVisual(m,selected)})}
 function centerOnOrg(id,lat,lon){if(!myMap)return;myMap.setCenter([lat,lon],15,{duration:500,checkZoomRange:true});setSelectedMarkers([id])}
 function parseBbox(b){try{let p=b.split('~').map(x=>x.split(',').map(Number));return [[p[0][1],p[0][0]],[p[1][1],p[1][0]]]}catch(e){return null}}

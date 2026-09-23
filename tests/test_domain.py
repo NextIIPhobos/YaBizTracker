@@ -1,3 +1,4 @@
+import os
 import unittest
 
 from yabiztracker.domain.filters import excluded_category_match, matches_organization_filters, organization_categories
@@ -153,6 +154,17 @@ class PhoneLinkTests(unittest.TestCase):
         self.assertEqual(messenger_url("Viber", phone), "https://viber.click/79999999999")
         self.assertEqual(messenger_url("Max", phone), "https://max.ru/+79999999999")
 
+    def test_messenger_url_templates_match_required_external_formats(self):
+        from yabiztracker.domain.phone import messenger_url
+        cases = {
+            "Telegram": ("89270006300", "https://t.me/+79270006300"),
+            "WhatsApp": ("89270006300", "https://wa.me/+79270006300"),
+            "Viber": ("89276188887", "https://viber.click/79276188887"),
+            "Max": ("89376624663", "https://max.ru/+79376624663"),
+        }
+        for messenger, (phone, expected) in cases.items():
+            self.assertEqual(messenger_url(messenger, phone), expected)
+
     def test_multiple_phone_values_are_split_and_deduplicated(self):
         from yabiztracker.domain.phone import split_phone_values
         self.assertEqual(
@@ -186,6 +198,12 @@ class CategorySearchScopeTests(unittest.TestCase):
         org={"name":"Alpha","address":"Samara"}
         self.assertFalse(matches_organization_filters(org, {"search":"alpha", "search_values":[]}))
 
+    def test_selected_statuses_are_or_filter(self):
+        org = {"status": "Клиент"}
+        self.assertTrue(matches_organization_filters(org, {"status_names": {"Клиент", "Новый"}}))
+        self.assertFalse(matches_organization_filters(org, {"status_names": {"Новый", "В работе"}}))
+        self.assertFalse(matches_organization_filters(org, {"status_names": set()}))
+
 
 class CategoriesFileTests(unittest.TestCase):
     def test_first_launch_creates_semicolon_catalog_with_comment(self):
@@ -206,3 +224,15 @@ class CategoriesFileTests(unittest.TestCase):
             path=os.path.join(d,"categories.txt")
             write_categories_file(path, ["Кафе","Кафе","Центр развития ребёнка"])
             self.assertEqual(load_categories_file(path), ["Кафе","Центр развития ребёнка"])
+
+
+class CategoryCatalogSyncTests(unittest.TestCase):
+    def test_append_missing_categories_uses_normalized_key(self):
+        from tempfile import TemporaryDirectory
+        from yabiztracker.domain.categories import write_categories_file, load_categories_file, append_missing_categories
+        with TemporaryDirectory() as d:
+            path=os.path.join(d, "categories.txt")
+            write_categories_file(path, ["Центр развития ребёнка", "Кафе"])
+            added=append_missing_categories(path, [" центр   развития ребенка ", "Новая   категория"])
+            self.assertEqual(added, ["Новая   категория"])
+            self.assertEqual(load_categories_file(path), ["Центр развития ребёнка", "Кафе", "Новая   категория"])
