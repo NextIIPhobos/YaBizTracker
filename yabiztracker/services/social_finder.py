@@ -59,8 +59,18 @@ class SocialFinderConfig:
     workers: int = 8
     timeout_seconds: float = 10.0
     max_response_bytes: int = 3 * 1024 * 1024
+    # ``website_pages`` is the current application setting. ``max_pages`` and
+    # ``respect_robots`` are kept as compatibility fields for the legacy
+    # WebsiteSocialFinder API and external integrations/tests.
     website_pages: int = 3
     validate_links: bool = True
+    max_pages: int | None = None
+    respect_robots: bool = True
+
+    def __post_init__(self):
+        if self.max_pages is not None:
+            object.__setattr__(self, "website_pages", max(1, int(self.max_pages)))
+        object.__setattr__(self, "website_pages", max(1, int(self.website_pages)))
 
 
 @dataclass
@@ -457,13 +467,20 @@ class SocialLinkFinder:
 
 
 class WebsiteSocialFinder(SocialLinkFinder):
-    """Backward-compatible website-only social-link extractor.
+    """Backward-compatible website-only social-link finder.
 
-    The application now uses ``SocialLinkFinder``. Older integrations and
-    tests can still use this name for extracting social links from HTML that
-    has already been fetched. Validation is deliberately delegated to the
-    canonical module-level extractor so both APIs use exactly the same rules.
+    The application now uses :class:`SocialLinkFinder`, but an earlier public
+    API exposed ``WebsiteSocialFinder(config)``. Keep that API working so
+    integrations/tests can be upgraded independently of the application.
+    All extracted URLs still pass through the same canonical validator.
     """
+
+    def __init__(self, db=None, config=None, logger_=None):
+        # Legacy signature: WebsiteSocialFinder(config).
+        if isinstance(db, SocialFinderConfig) and config is None:
+            config = db
+            db = None
+        super().__init__(db, config or SocialFinderConfig(), logger_)
 
     def extract_links_from_html(self, html_text: str) -> dict[str, list[str]]:
         return extract_social_links(html_text)
@@ -473,3 +490,64 @@ class WebsiteSocialFinder(SocialLinkFinder):
 
     def extract_social_links(self, html_text: str) -> dict[str, list[str]]:
         return self.extract_links_from_html(html_text)
+
+    def scan_website(self, org_id: str, website: str) -> SocialScanResult:
+        """Scan only the supplied website using the legacy API shape."""
+        website = str(website or "").strip()
+        if not website:
+            return SocialScanResult(str(org_id), {}, "no_website")
+        if not re.match(r"^https?://", website, re.I):
+            website = "https://" + website
+
+        all_links: dict[str, list[str]] = {}
+        sources: list[str] = []
+        errors: list[str] = []
+        queue = [website]
+        visited: set[str] = set()
+        base_host = (urlparse(website).hostname or "").lower().removeprefix("www.")
+        pages_left = max(1, self.config.website_pages)
+
+        while queue and pages_left > 0 and not self.stop_event.is_set():
+            page_url = queue.pop(0)
+            if page_url in visited:
+                continue
+            visited.add(page_url)
+            try:
+                body, final_url = self._fetch(page_url)
+                if not body:
+                    continue
+                for platform, values in extract_social_links(body).items():
+                    all_links.setdefault(platform, []).extend(values)
+                sources.append(final_url)
+                pages_left -= 1
+                if pages_left > 0:
+                    parser = _LinkParser()
+                    parser.feed(_decode_html(body))
+                    candidates = []
+                    for href in parser.hrefs:
+                        absolute = urljoin(final_url, href)
+                        parsed = urlparse(absolute)
+                        host = (parsed.hostname or "").lower().removeprefix("www.")
+                        if parsed.scheme not in {"http", "https"} or host != base_host:
+                            continue
+                        candidates.append(absolute)
+                    for candidate in candidates:
+                        if candidate not in visited and candidate not in queue:
+                            queue.append(candidate)
+            except Exception as exc:
+                errors.append(f"{page_url}: {type(exc).__name__}: {exc}")
+
+        merged = merge_social_links(all_links)
+        if merged and self.config.validate_links:
+            merged = {
+                platform: [url for url in values if self._validate(url)]
+                for platform, values in merged.items()
+            }
+            merged = {platform: values for platform, values in merged.items() if values}
+        if merged:
+            return SocialScanResult(str(org_id), merged, "found", "; ".join(errors), sources)
+        return SocialScanResult(str(org_id), {}, "error" if errors else "not_found", "; ".join(errors), sources)
+
+    def find(self, website: str) -> dict[str, list[str]]:
+        """Legacy convenience method returning links for one website."""
+        return self.scan_website("", website).links
