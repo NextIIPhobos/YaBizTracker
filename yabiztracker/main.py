@@ -56,6 +56,9 @@ def main():
         return 2
     w = MainWindow(base_dir)
     context["window"] = w
+    # closeEvent performs the normal shutdown; aboutToQuit is a final idempotent
+    # safety net for programmatic QApplication.quit()/exit() paths.
+    app.aboutToQuit.connect(w.shutdown)
     w.show()
     return app.exec()
 

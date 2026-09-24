@@ -65,6 +65,18 @@ class AppLogger(QObject):
             self.logger.addHandler(file_handler)
         return removed
 
+
+    def close(self):
+        """Flush and close all logging handlers owned by the application."""
+        for handler in list(self.logger.handlers):
+            try:
+                handler.flush()
+            except Exception:
+                pass
+            try:
+                handler.close()
+            finally:
+                self.logger.removeHandler(handler)
     def log_general(self, level, msg):
         self.recent.append(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] [{level}] {msg}")
         self.log_message.emit(datetime.now().strftime("%H:%M:%S"), level, msg)

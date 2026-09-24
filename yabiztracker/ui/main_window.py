@@ -50,7 +50,7 @@ class MainWindow(QMainWindow):
         self.usage.set_limits(self.settings.get("api_limits",self.usage.snapshot()["limits"]))
         self.settings["api_limits"]=self.usage.snapshot()["limits"]
         self.db=Database(os.path.join(base_dir,"organizations.db"));self.db.purge_trash(days=30);self.api=YandexAPI(self.config.get("search_key",""),self.config.get("geocoder_key",""),self.usage)
-        self.logger=AppLogger(base_dir);self.backup_service=self._build_backup_service();self.bridge=MapBridge();self.scan_worker=None;self.email_worker=None;self.health_worker=None;self.social_controller=SocialScanController(self);self.scheduler=None;self.map_ready=False;self.state=AppState.INITIALIZING;self._updating_table=False;self._selection_from_marker=False;self._suppress_selection_fit=False;self.last_run_usage=None;self._active_orgs=[];self._org_by_id={}
+        self.logger=AppLogger(base_dir);self.backup_service=self._build_backup_service();self.bridge=MapBridge();self.scan_worker=None;self.email_worker=None;self.health_worker=None;self.social_controller=SocialScanController(self);self.scheduler=None;self.map_ready=False;self.state=AppState.INITIALIZING;self._shutdown_started=False;self._updating_table=False;self._selection_from_marker=False;self._suppress_selection_fit=False;self.last_run_usage=None;self._active_orgs=[];self._org_by_id={}
         self.quota_timer=QTimer(self);self.quota_timer.setSingleShot(True);self.trash_cleanup_timer=QTimer(self);self.trash_cleanup_timer.setInterval(60*60*1000);self.trash_cleanup_timer.timeout.connect(self.cleanup_trash);self.trash_cleanup_timer.start()
         self.setWindowTitle("YaBizTracker — мониторинг новых организаций");self.setWindowIcon(QApplication.instance().windowIcon());self.resize(1880,980);self.setMinimumSize(1200,700)
         self.build_ui()
@@ -346,43 +346,92 @@ class MainWindow(QMainWindow):
         if self.scheduler and self.scheduler.running:
             try:self.scheduler.add_job(self._scheduler_request,"date",run_date=next_scan,id="scan",max_instances=1,coalesce=True,replace_existing=True)
             except Exception as exc:self.logger.log_general("WARNING",f"Не удалось запланировать следующий автопоиск: {exc}")
-    def closeEvent(self,e):
+    def _stop_worker(self, worker, timeout_ms, name):
+        if worker is None or not worker.isRunning():
+            return True
+        try:
+            stop = getattr(worker, "stop", None)
+            if callable(stop):
+                stop()
+            else:
+                worker.requestInterruption()
+        except Exception as exc:
+            self.logger.log_general("WARNING", f"Не удалось запросить остановку {name}: {exc}")
+        if worker.wait(timeout_ms):
+            try:
+                worker.deleteLater()
+            except Exception:
+                pass
+            return True
+        self.logger.log_general("ERROR", f"{name} не завершился за отведённое время; закрытие отменено для защиты данных.")
+        return False
+
+    def shutdown(self):
+        """Stop background activity and release process-owned resources once."""
+        if self._shutdown_started:
+            return True
+        self._shutdown_started = True
         self.set_state(AppState.STOPPING)
-        for timer in (getattr(self,"quota_timer",None),getattr(self,"trash_cleanup_timer",None)):
-            if timer is not None:timer.stop()
+        for timer in (getattr(self, "quota_timer", None), getattr(self, "trash_cleanup_timer", None)):
+            if timer is not None:
+                timer.stop()
         if self.scheduler:
-            try:self.scheduler.shutdown(wait=True)
-            except Exception as exc:self.logger.log_general("WARNING",f"Scheduler не завершился штатно: {exc}")
-            self.scheduler=None
-        if self.scan_worker and self.scan_worker.isRunning():
-            self.scan_worker.requestInterruption();self.progress_label.setText("Завершение текущего запроса…");self.scan_worker.wait(75_000)
-            if self.scan_worker.isRunning():
-                self.logger.log_general("ERROR","Сканирование не завершилось в безопасный срок; база оставлена открытой для защиты данных.");e.ignore();return
-        if self.email_worker and self.email_worker.isRunning():
-            self.email_worker.stop();self.email_worker.wait(120_000)
-            if self.email_worker.isRunning():
-                self.logger.log_general("ERROR","Сбор e-mail не завершился в безопасный срок; закрытие отменено для защиты данных.");e.ignore();return
-        if self.health_worker and self.health_worker.isRunning():
-            self.health_worker.requestInterruption();self.health_worker.wait(15_000)
-            if self.health_worker.isRunning():
-                self.logger.log_general("ERROR","Проверка API не завершилась в безопасный срок; закрытие отменено.");e.ignore();return
-        try:self.usage.flush()
-        except Exception as exc:self.logger.log_general("WARNING",f"Не удалось сохранить API usage при закрытии: {exc}")
-        if getattr(self,"tray_icon",None):self.tray_icon.hide()
-        webview=getattr(self,"map",None)
+            try:
+                self.scheduler.shutdown(wait=True)
+            except Exception as exc:
+                self.logger.log_general("WARNING", f"Scheduler не завершился штатно: {exc}")
+            self.scheduler = None
+        if not self._stop_worker(self.scan_worker, 75_000, "Сканирование"):
+            self._shutdown_started = False
+            return False
+        social_worker = getattr(self.social_controller, "worker", None)
+        if not self._stop_worker(social_worker, 30_000, "Поиск соц. сетей"):
+            self._shutdown_started = False
+            return False
+        if not self._stop_worker(self.email_worker, 30_000, "Сбор e-mail"):
+            self._shutdown_started = False
+            return False
+        if not self._stop_worker(self.health_worker, 15_000, "Проверка API"):
+            self._shutdown_started = False
+            return False
+        try:
+            self.usage.flush()
+        except Exception as exc:
+            self.logger.log_general("WARNING", f"Не удалось сохранить API usage при закрытии: {exc}")
+        if getattr(self, "tray_icon", None):
+            self.tray_icon.hide()
+        webview = getattr(self, "map", None)
         if webview is not None:
-            for action in (lambda:webview.stop(),lambda:webview.setUrl(QUrl("about:blank")),lambda:webview.close(),lambda:webview.deleteLater()):
-                try:action()
-                except Exception:pass
-        for obj_name in ("channel","bridge"):
-            obj=getattr(self,obj_name,None)
+            for action in (lambda: webview.stop(), lambda: webview.setUrl(QUrl("about:blank")), lambda: webview.close(), lambda: webview.deleteLater()):
+                try:
+                    action()
+                except Exception:
+                    pass
+        for obj_name in ("channel", "bridge"):
+            obj = getattr(self, obj_name, None)
             if obj is not None:
-                try:obj.deleteLater()
-                except Exception:pass
-        try:QApplication.processEvents()
-        except Exception:pass
-        try:self.db.close()
-        finally:e.accept()
+                try:
+                    obj.deleteLater()
+                except Exception:
+                    pass
+        try:
+            QApplication.processEvents()
+        except Exception:
+            pass
+        try:
+            self.db.close()
+        finally:
+            try:
+                self.logger.close()
+            except Exception:
+                pass
+        return True
+
+    def closeEvent(self, e):
+        if self.shutdown():
+            e.accept()
+        else:
+            e.ignore()
     def estimate_requests(self):
         base=max(1,len(self.settings.get("cities",[])))*max(1,len(self.settings.get("categories",[])))
         metrics=self.settings.get("last_scan_metrics",{}) or {}

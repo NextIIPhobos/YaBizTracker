@@ -208,15 +208,23 @@ def test_main_window_uses_persistent_wall_clock_scheduler_helper():
     assert 'id="scan"' in source
 
 
-def test_main_window_shutdown_stops_timers_and_closes_webengine_before_db():
+def test_main_window_shutdown_stops_all_background_workers_and_closes_resources():
     source=(ROOT / "ui" / "main_window.py").read_text(encoding="utf-8")
+    assert "def _stop_worker" in source
+    assert "def shutdown" in source
+    assert 'social_worker = getattr(self.social_controller, "worker", None)' in source
+    assert "self._stop_worker(self.scan_worker" in source
+    assert "self._stop_worker(social_worker" in source
+    assert "self._stop_worker(self.email_worker" in source
+    assert "self._stop_worker(self.health_worker" in source
     assert "self.quota_timer" in source and "timer.stop()" in source
     assert 'webview.stop()' in source
     assert 'webview.setUrl(QUrl("about:blank"))' in source
     assert 'webview.deleteLater()' in source
+    assert 'self.logger.close()' in source
     assert 'QApplication.processEvents()' in source
-    # DB must remain open until workers and WebEngine have been handled.
     assert source.index("webview.stop()") < source.index("self.db.close()")
+    assert source.index("self.db.close()") < source.index("self.logger.close()")
 
 
 def test_organization_table_exposes_settlement_column_and_filter():
