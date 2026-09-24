@@ -242,3 +242,14 @@ def test_main_window_responsive_splitter_and_table_do_not_overflow_left_pane():
     assert "QGridLayout()" in source
     assert "i//3,i%3" in source
     assert "center=max(460,w-left-right)" in source
+
+
+def test_social_discovery_components_are_present_and_versioned():
+    root = pathlib.Path(__file__).resolve().parents[1]
+    assert (root / "yabiztracker" / "services" / "social_finder.py").is_file()
+    assert (root / "yabiztracker" / "ui" / "social_worker.py").is_file()
+    assert (root / "yabiztracker" / "ui" / "social_menu.py").is_file()
+    assert (root / "yabiztracker" / "ui" / "social_controller.py").is_file()
+    db = (root / "yabiztracker" / "database" / "database.py").read_text(encoding="utf-8")
+    assert "SCHEMA_VERSION = 10" in db
+    assert "social_scan_status" in db

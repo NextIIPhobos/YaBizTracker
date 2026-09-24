@@ -14,8 +14,7 @@ from ..api import YandexAPI
 from ..api.errors import ApiLimitError, ApiAuthError
 from ..bridge import MapBridge
 from ..database import Database
-from ..domain.models import STATUS_OPTIONS
-from ..domain.filters import matches_organization_filters, organization_categories
+from ..domain.models import STATUS_OPTIONS; from ..domain.filters import matches_organization_filters, organization_categories
 from ..domain.categories import ensure_categories_file, categories_file_path
 from ..domain.schedule import next_wall_clock_occurrence
 from ..domain.table import OrgColumn
@@ -30,11 +29,9 @@ from ..logger import AppLogger
 from .. import __version__
 from .workers import HealthWorker
 from .email_worker import EmailFinderWorker
-from .social_worker import SocialFinderWorker
-from .widgets import OrganizationTableWidget, CheckableDropdown, PresenceFilterButton, ColumnVisibilityPopup
-from .messenger_menu import build_messenger_menu
-from .dialogs import SettingsDialog, TrashDialog, ExportDialog
-from .delegates import NextContactItem, NextContactDelegate, StatusDelegate
+from .widgets import OrganizationTableWidget, CheckableDropdown, PresenceFilterButton, ColumnVisibilityPopup; from .messenger_menu import build_messenger_menu
+from .social_menu import build_social_menu; from .social_controller import SocialScanController
+from .dialogs import SettingsDialog, TrashDialog, ExportDialog; from .delegates import NextContactItem, NextContactDelegate, StatusDelegate
 class AppState(Enum):
     INITIALIZING = "initializing"
     READY = "ready"
@@ -53,7 +50,7 @@ class MainWindow(QMainWindow):
         self.usage.set_limits(self.settings.get("api_limits",self.usage.snapshot()["limits"]))
         self.settings["api_limits"]=self.usage.snapshot()["limits"]
         self.db=Database(os.path.join(base_dir,"organizations.db"));self.db.purge_trash(days=30);self.api=YandexAPI(self.config.get("search_key",""),self.config.get("geocoder_key",""),self.usage)
-        self.logger=AppLogger(base_dir);self.backup_service=self._build_backup_service();self.bridge=MapBridge();self.scan_worker=None;self.email_worker=None;self.social_worker=None;self.health_worker=None;self.scheduler=None;self.map_ready=False;self.state=AppState.INITIALIZING;self._updating_table=False;self.last_run_usage=None;self._active_orgs=[];self._org_by_id={}
+        self.logger=AppLogger(base_dir);self.backup_service=self._build_backup_service();self.bridge=MapBridge();self.scan_worker=None;self.email_worker=None;self.health_worker=None;self.social_controller=SocialScanController(self);self.scheduler=None;self.map_ready=False;self.state=AppState.INITIALIZING;self._updating_table=False;self._selection_from_marker=False;self._suppress_selection_fit=False;self.last_run_usage=None;self._active_orgs=[];self._org_by_id={}
         self.quota_timer=QTimer(self);self.quota_timer.setSingleShot(True);self.trash_cleanup_timer=QTimer(self);self.trash_cleanup_timer.setInterval(60*60*1000);self.trash_cleanup_timer.timeout.connect(self.cleanup_trash);self.trash_cleanup_timer.start()
         self.setWindowTitle("YaBizTracker — мониторинг новых организаций");self.setWindowIcon(QApplication.instance().windowIcon());self.resize(1880,980);self.setMinimumSize(1200,700)
         self.build_ui()
@@ -188,7 +185,7 @@ class MainWindow(QMainWindow):
         self.icon_credit.setToolTip("Источник иконки: Flaticon.com")
         self.statusBar().addPermanentWidget(self.icon_credit)
         self.stop_btn.setVisible(False)
-        help_menu=self.menuBar().addMenu("Помощь");email_action=help_menu.addAction("Запустить сбор E-mail");email_action.triggered.connect(self.manual_email_scan);category_check=help_menu.addAction("Проверка доступных категорий");category_check.triggered.connect(self.check_available_categories);social_action=help_menu.addAction("Ручной поиск соц. сетей");social_action.triggered.connect(self.manual_social_scan);help_menu.addSeparator();diag=help_menu.addAction("Диагностика");diag.triggered.connect(self.show_diagnostics)
+        help_menu=self.menuBar().addMenu("Помощь");email_action=help_menu.addAction("Запустить сбор E-mail");email_action.triggered.connect(self.manual_email_scan);social_action=help_menu.addAction("Ручной поиск соц. сетей");social_action.triggered.connect(self.social_controller.manual);category_check=help_menu.addAction("Проверка доступных категорий");category_check.triggered.connect(self.check_available_categories);help_menu.addSeparator();diag=help_menu.addAction("Диагностика");diag.triggered.connect(self.show_diagnostics)
     def _optimize_splitter_sizes(self):
         sp=getattr(self,"_main_splitter",None)
         if sp is None:return
@@ -266,9 +263,13 @@ class MainWindow(QMainWindow):
             if self.org_table.isRowHidden(r):
                 self.logger.log_general("WARNING",f"Клик по маркеру организации {target}, отсутствующей в текущем фильтре")
                 return
-            self.org_table.setCurrentCell(r,OrgColumn.NAME,QItemSelectionModel.SelectionFlag.ClearAndSelect|QItemSelectionModel.SelectionFlag.Rows)
-            self.org_table.scrollToItem(it)
-            self.selection_changed()
+            self._selection_from_marker = True
+            try:
+                self.org_table.setCurrentCell(r,OrgColumn.NAME,QItemSelectionModel.SelectionFlag.ClearAndSelect|QItemSelectionModel.SelectionFlag.Rows)
+                self.org_table.scrollToItem(it)
+                self.selection_changed()
+            finally:
+                self._selection_from_marker = False
             return
         self.logger.log_general("WARNING",f"Не удалось найти организацию для маркера: {target}")
     def on_map_ready(self):
@@ -446,6 +447,7 @@ class MainWindow(QMainWindow):
         self.check_available_categories(log_only=True)
         self.set_state(AppState.READY if not st.get("errors") else AppState.ERROR);self.refresh_all()
         if not st.get("cancelled"):
+            self.social_controller.start()
             self.start_email_finder()
         self.last_scan_label.setText(f"Последний запуск: {datetime.now():%d.%m.%Y %H:%M} | найдено уникальных: {st.get('unique_found',0)} | новых: {st.get('new_count',0)}")
         self.quality.setText(f"Всего результатов API: {st.get('api_results',0)}\nУникальных: {st.get('unique_found',0)}\nНовых: {st.get('new_count',0)}\nИзменено: {st.get('updated',0)}\nДубликатов: {st.get('duplicates',0)}\nИсключено: {st.get('ignored',0)}\nБез телефона: {st.get('without_phone',0)} | без e-mail: {st.get('without_email',0)}\nБез сайта: {st.get('without_website',0)} | без координат: {st.get('without_coordinates',0)}\nОшибок/пропусков: {st.get('errors',0)+st.get('warnings',0)}")
@@ -457,27 +459,6 @@ class MainWindow(QMainWindow):
         self.logger.log_general("INFO",f"Сканирование: API={st.get('api_results',0)}, уникальных={st.get('unique_found',0)}, новых={st.get('new_count',0)}")
         self.show_notification(st.get("new_count",0),st)
         self.update_usage_ui()
-    def start_social_finder(self, organizations=None):
-        if self.social_worker and self.social_worker.isRunning():
-            QMessageBox.information(self, "Поиск соц. сетей", "Поиск соц. сетей уже выполняется."); return
-        candidates=list(organizations or self.db.get_all_organizations())
-        if not candidates:
-            QMessageBox.information(self, "Поиск соц. сетей", "В базе нет организаций."); return
-        self.social_worker=SocialFinderWorker(self.db,self.settings,candidates,self.api)
-        self.social_worker.progress.connect(self.social_scan_progress); self.social_worker.completed.connect(self.social_scan_completed); self.social_worker.failed.connect(self.social_scan_failed); self.social_worker.start()
-        self.progress_label.setText(f"Ручной поиск соц. сетей: 0/{len(candidates)} организаций")
-        self.logger.log_general("INFO",f"Ручной поиск соц. сетей запущен: организаций={len(candidates)}")
-    def manual_social_scan(self):
-        self.start_social_finder()
-    def social_scan_progress(self,d):
-        self.progress_label.setText(f"Поиск соц. сетей: {int(d.get('processed',0))}/{int(d.get('queued',0))} организаций | найдено: {int(d.get('found',0))} | изменено: {int(d.get('updated',0))}")
-        if d.get("processed",0) % 25 == 0 and d.get("links"): self.refresh_all()
-    def social_scan_completed(self,st):
-        self.refresh_all(); self.logger.log_general("INFO",f"Поиск соц. сетей завершён: обработано={st.get('processed',0)}, найдено={st.get('found',0)}, изменено={st.get('updated',0)}, без ссылок={st.get('not_found',0)}, ошибок={st.get('errors',0)}")
-    def social_scan_failed(self,e):
-        self.logger.log_general("ERROR",f"Поиск соц. сетей завершился ошибкой: {type(e).__name__}: {e}")
-        QMessageBox.warning(self,"Поиск соц. сетей","Не удалось завершить поиск соц. сетей. Подробности записаны в журнал.")
-
     def start_email_finder(self, organizations=None, force=False):
         cfg=self.settings.get("email_finder",{}) or {}
         if not bool(cfg.get("enabled",True)) and not force:
@@ -685,6 +666,8 @@ class MainWindow(QMainWindow):
             b.setEnabled(has_selection)
             b.setToolTip("" if has_selection else "Выберите хотя бы одну организацию в списке.")
         self.map_controller.sync_selection(self.org_table)
+        if not self._selection_from_marker and not self._updating_table and not getattr(self,"_suppress_selection_fit",False):
+            self.map_controller.fit_selection(self.org_table)
     def crm_changed(self,item):
         if self._updating_table or item.column() not in (OrgColumn.STATUS,OrgColumn.COMMENT,OrgColumn.RESPONSIBLE,OrgColumn.NEXT_CONTACT):return
         oid=self.org_table.item(item.row(),0).data(Qt.ItemDataRole.UserRole);fields={OrgColumn.STATUS:"status",OrgColumn.COMMENT:"comment",OrgColumn.RESPONSIBLE:"responsible",OrgColumn.NEXT_CONTACT:"next_contact_date"}
@@ -702,13 +685,21 @@ class MainWindow(QMainWindow):
             value=str(item.data(Qt.ItemDataRole.UserRole+1) or "").strip() or self._normalize_next_contact(value)
             item.setData(Qt.ItemDataRole.UserRole+1,value)
             item.setText(self._display_next_contact(value))
-        self.db.update_crm(oid,**{fields[item.column()]:value});self.style_status(item.row());self.apply_filters();self.apply_map()
+        self.db.update_crm(oid,**{fields[item.column()]:value});self.style_status(item.row());self._suppress_selection_fit=True
+        try:self.apply_filters()
+        finally:self._suppress_selection_fit=False
+        self.apply_map()
     def show_org_context_menu(self,pos):
         item=self.org_table.itemAt(pos)
         if not item:
             return
         if item.column() == OrgColumn.PHONE:
             menu = build_messenger_menu(self, self._split_contact_values(item.text()))
+            if menu:
+                menu.exec(self.org_table.viewport().mapToGlobal(pos))
+            return
+        if item.column() == OrgColumn.SOCIAL:
+            menu=build_social_menu(self, item.text())
             if menu:
                 menu.exec(self.org_table.viewport().mapToGlobal(pos))
             return

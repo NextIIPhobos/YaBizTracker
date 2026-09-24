@@ -60,12 +60,30 @@ class MapController:
                     ids.append(str(oid))
         self._js(f"setSelectedMarkers({json.dumps(ids, ensure_ascii=False)});")
 
-    def fit_after_selection_change(self, table) -> None:
-        """Legacy compatibility method: selection must never move the map viewport."""
+    def fit_selection(self, table) -> None:
+        """Fit the map to the organizations selected in the table.
+
+        This method is called only for a genuine table-driven selection. Marker
+        clicks deliberately bypass it so clicking a marker never moves the map.
+        """
         if not self.is_ready():
             return
-        self.sync_selection(table)
+        organizations = []
+        for index in table.visible_selected_rows():
+            item = table.item(index.row(), self.org_column.NAME)
+            if not item:
+                continue
+            oid = item.data(Qt.ItemDataRole.UserRole)
+            if oid is None:
+                continue
+            org = self.db.get_by_id(str(oid))
+            if org and org.get("latitude") is not None and org.get("longitude") is not None:
+                organizations.append(org)
+        self._js(f"fitOnOrganizations({json.dumps(organizations, ensure_ascii=False)});")
+
+    def fit_after_selection_change(self, table) -> None:
+        """Backward-compatible alias for explicit table selection fitting."""
+        self.fit_selection(table)
 
     def schedule_selection_fit(self, table, delay: int = 50) -> None:
-        # Kept for compatibility with older callers; intentionally does not move the viewport.
-        QTimer.singleShot(delay, lambda: self.fit_after_selection_change(table))
+        QTimer.singleShot(delay, lambda: self.fit_selection(table))

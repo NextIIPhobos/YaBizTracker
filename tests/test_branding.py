@@ -36,7 +36,7 @@ def test_ui_is_split_into_cohesive_modules():
     assert {"SettingsDialog", "TrashDialog", "ExportDialog"} <= classes(ui / "dialogs.py")
     assert {"NextContactItem", "NextContactDelegate", "StatusDelegate"} <= classes(ui / "delegates.py")
     assert {"HealthWorker", "SuggestWorker"} <= classes(ui / "workers.py")
-    assert (len((ui / "main_window.py").read_text(encoding="utf-8").splitlines()) < 980)
+    assert (len((ui / "main_window.py").read_text(encoding="utf-8").splitlines()) < 960)
 
 
 def test_pyinstaller_build_configuration_is_explicit():

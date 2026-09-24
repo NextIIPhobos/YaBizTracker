@@ -4,7 +4,7 @@ import requests
 from .errors import ApiError, ApiLimitError, ApiAuthError, ApiNetworkError, ApiServerError, ApiInvalidResponseError
 from .. import __version__
 from ..domain.filters import excluded_category_match
-from ..domain.socials import extract_social_links
+from ..services.social_finder import extract_social_links, merge_social_links
 logger=logging.getLogger(__name__)
 
 class YandexSearchClient:
@@ -37,11 +37,6 @@ class YandexSearchClient:
         r=self._request({"apikey":self.key,"uri":uri,"type":"geo","lang":"ru_RU","results":1},12)
         try:return r.json().get("features",[]) or []
         except ValueError as e:raise ApiInvalidResponseError("Некорректный JSON Search API",api="search",technical=str(e))
-
-    def resolve_organization(self, org_id):
-        oid=str(org_id or "").strip()
-        if not oid:return []
-        return self.resolve_uri(f"ymapsbm1://org?oid={oid}")
 
 class YandexGeocoderClient:
     URL="https://geocode-maps.yandex.ru/v1/"
@@ -160,7 +155,16 @@ class YandexAPI:
             source_status = "open"
         else:
             source_status = "unknown"
-        socials = extract_social_links(feature)
+        socials={}
+        raw_link_values=[]
+        for x in meta.get("Links") or meta.get("links") or []:
+            if isinstance(x,dict):
+                raw_link_values.extend([first(x.get("href"),x.get("url")), str(x.get("name") or "")])
+            elif x:
+                raw_link_values.append(str(x))
+        if raw_link_values:
+            socials = extract_social_links(" ".join(raw_link_values))
+        socials = merge_social_links(socials)
         return {"id":oid,"name":name,"address":first(addr.get("formatted"),p.get("description")),
                 "category":cats[0] if cats else "","subcategory":cats[1] if len(cats)>1 else "",
                 "categories":cats,

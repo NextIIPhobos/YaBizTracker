@@ -45,7 +45,7 @@ class MapViewportContractTests(unittest.TestCase):
         self.assertNotIn("_selection_map_timer", ui)
         self.assertNotIn("fitOnOrganizations(", ui)
         self.assertIn("def fit_after_selection_change", controller)
-        self.assertIn("selection must never move the map viewport", controller)
+        self.assertIn("def fit_selection", controller)
 
     def test_map_marker_colors_use_monitoring_period_and_selection_is_persistent(self):
         text = (ROOT / "yabiztracker" / "map.html").read_text(encoding="utf-8")
@@ -120,3 +120,22 @@ class V111MapContractTests(unittest.TestCase):
         assert (ROOT / "VERSION").read_text(encoding="utf-8").strip() == "1.1.2"
         assert 'version = "1.1.2"' in (ROOT / "pyproject.toml").read_text(encoding="utf-8")
         assert '__version__="1.1.2"' in (ROOT / "yabiztracker" / "__init__.py").read_text(encoding="utf-8")
+
+class V112SelectionViewportTests(unittest.TestCase):
+    def test_table_selection_fits_organizations_but_marker_click_bypasses_fit(self):
+        ui = (ROOT / "yabiztracker" / "ui" / "main_window.py").read_text(encoding="utf-8")
+        controller = (ROOT / "yabiztracker" / "services" / "map_controller.py").read_text(encoding="utf-8")
+        js = (ROOT / "yabiztracker" / "map.html").read_text(encoding="utf-8")
+        assert "self._selection_from_marker = True" in ui
+        assert "self._selection_from_marker" in ui and "self.map_controller.fit_selection(self.org_table)" in ui
+        assert "self.map_controller.fit_selection(self.org_table)" in ui
+        assert "def fit_selection(self, table)" in controller
+        assert 'self._js(f"fitOnOrganizations(' in controller
+        assert "myMap.setCenter(points[0],16" in js
+        assert "_fitPoints(points,12,18,80)" in js
+        assert "notifyMarkerClicked(id)" in js
+
+    def test_selection_fit_does_not_reintroduce_old_always_fit_contract(self):
+        controller = (ROOT / "yabiztracker" / "services" / "map_controller.py").read_text(encoding="utf-8")
+        assert "selection must never move the map viewport" not in controller
+        assert "def fit_selection(self, table)" in controller

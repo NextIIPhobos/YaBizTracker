@@ -13,7 +13,7 @@
 
 ## Русская версия
 
-YaBizTracker — локальное Windows-приложение для поиска новых организаций и контактных данных через Yandex Maps API. Программа предназначена для маркетологов и специалистов по продажам: она сохраняет историю обнаружения организаций, отслеживает новые результаты, предоставляет фильтры и CRM-поля, показывает организации на карте и умеет собирать публичные e-mail с сайтов организаций.
+YaBizTracker 1.1.2 — локальное Windows-приложение для поиска новых организаций и контактных данных через Yandex Maps API. Программа предназначена для маркетологов и специалистов по продажам: она сохраняет историю обнаружения организаций, отслеживает новые результаты, предоставляет фильтры и CRM-поля, показывает организации на карте и умеет собирать публичные e-mail с сайтов организаций.
 
 Приложение рассчитано на работу одного пользователя на локальном компьютере. Основные данные хранятся в SQLite, плановые поиски выполняются в фоне, отдельный сервер приложения не требуется.
 
@@ -38,6 +38,28 @@ YaBizTracker — локальное Windows-приложение для поис
 - Резервное копирование SQLite и проверка резервных копий.
 - Экспорт в XLSX с независимым fallback-записывателем.
 - Диагностика, ротация логов и отчёты о падениях.
+- Фоновый поиск социальных сетей по публичной карточке организации в Яндекс Картах и по сайту организации.
+- Поддержка VK, Telegram, Max, Instagram, Одноклассников, Дзен, Rutube, YouTube, TikTok, Facebook, X/Twitter, Threads, Pinterest, LinkedIn, Viber, WhatsApp и Discord.
+- Проверка найденных социальных URL и удаление явно недоступных ссылок (404/5xx).
+- «Помощь → Ручной поиск соц. сетей» для повторной обработки всех организаций в локальной БД.
+- ПКМ по ячейке «Соцсети» открывает ссылки сгруппированными по платформам.
+
+## Поиск социальных сетей
+
+Начиная с версии 1.1.2 поиск социальных сетей выполняется отдельным фоновым enrichment-процессом. Это сделано намеренно: в официальной документации HTTP API Поиска по организациям описаны сайт, телефоны, категории и другие поля `CompanyMetaData`, но социальные сети отдельным поддерживаемым полем не определены. Неописанные поля ответа Яндекс прямо рекомендует не использовать как стабильный API-контракт. Поэтому YaBizTracker не зависит от undocumented-поля `Links`: он использует ID организации и публичную карточку Яндекс Карт, а также официальный сайт организации как дополнительные источники.
+
+Источники и обработка:
+
+1. Для каждой организации строится публичный URL карточки Яндекс Карт.
+2. Из HTML/встроенных данных извлекаются ссылки на известные социальные платформы. Поддерживаются VK, Telegram, Max, Instagram, Одноклассники, Дзен, Rutube, YouTube, TikTok, Facebook, X/Twitter, Threads, Pinterest, LinkedIn, Viber, WhatsApp и Discord.
+3. Если у организации есть сайт, дополнительно проверяется главная страница и ограниченное число релевантных внутренних страниц (`contacts`, `about`, `реквизиты`, `соцсети` и аналогичные).
+4. URL проходят строгую валидацию: принимаются только известные host-имена платформ, запрещаются служебные subdomain-ы и типовые внутренние маршруты (в том числе `yandexmaps`, `mapsyandex`, `rtrg`, `away.php`, `friends`, CDN/API и статические ресурсы), после чего URL нормализуются, очищаются от tracking-параметров и дубликатов.
+5. Найденные ссылки проходят HTTP-проверку. Статусы 404 и 5xx считаются недействительными; 401/403/405/429 не считаются доказательством того, что URL не существует, поскольку социальные платформы часто используют защиту или запрещают HEAD-запросы.
+6. Уже сохранённые ссылки не удаляются из-за временной сетевой ошибки. Новые валидные ссылки объединяются с историческими.
+
+После завершения обычного поиска организаций социальный поиск запускается в фоне и не блокирует интерфейс. Для полного повторного поиска используется **Помощь → Ручной поиск соц. сетей**. ПКМ по ячейке «Соцсети» показывает найденные ссылки по платформам; выбор ссылки открывает её системным браузером.
+
+Поле `social_links` хранится в совместимом JSON-формате. Старый формат `{"vk":"https://vk.com/example"}` продолжает читаться, а новый формат допускает несколько ссылок одной платформы, например `{"vk":["https://vk.com/a","https://vk.com/b"],"max":["https://max.ru/channel"]}`.
 
 ## Архитектура
 
@@ -79,6 +101,8 @@ YaBizTracker — локальное Windows-приложение для поис
 
 **UI разделён по ответственности.** `main_window.py` отвечает за оркестрацию приложения, а диалоги, делегаты, виджеты и worker-потоки вынесены в отдельные модули.
 
+**Социальное обогащение изолировано от UI.** `services/social_finder.py` отвечает за извлечение и строгую валидацию URL, `ui/social_controller.py` управляет жизненным циклом фонового сканирования, `ui/social_worker.py` выполняет его в отдельном Qt-потоке, а `ui/social_menu.py` только отображает уже сохранённые ссылки.
+
 **Живость данных отслеживается по городу и категории поиска.** Глобальный счётчик пропусков небезопасен, потому что одна организация может одновременно относиться к нескольким категориям. Таблица `organization_category_observations` не позволяет удалить лид только потому, что он исчез из одного запроса, оставаясь видимым в другом.
 
 **Записи SQLite транзакционные.** Upsert организации и наблюдения по категориям для обработанной страницы фиксируются вместе. Изменения CRM, операции корзины, миграции и чекпоинты также выполняются транзакционно.
@@ -96,7 +120,14 @@ YaBizTracker — локальное Windows-приложение для поис
 │   ├── database/         # SQLite-схема, миграции и persistence
 │   ├── domain/           # независимые от фреймворков бизнес-правила
 │   ├── services/         # прикладные сервисы
-│   └── ui/               # Qt-окна, диалоги, виджеты, делегаты, workers
+│   │   ├── social_finder.py # извлечение, нормализация и валидация соцсетей
+│   │   ├── email_finder.py  # сбор e-mail с сайтов
+│   │   ├── scan_service.py  # поиск и reconciliation
+│   │   └── map_controller.py # синхронизация списка и карты
+│   └── ui/               # Qt-окна, диалоги, виджеты и workers
+│       ├── social_controller.py / social_worker.py
+│       ├── email_worker.py
+│       └── social_menu.py
 ├── tests/                # unit, integration и regression tests
 ├── main.py               # тонкая точка входа приложения
 ├── YaBizTracker.spec     # описание сборки PyInstaller
@@ -150,7 +181,8 @@ API-слой различает ошибки авторизации, квот, �
 - населённые пункты;
 - включаемые и исключаемые категории;
 - интервал поиска;
-- политика резервного копирования.
+- политика резервного копирования;
+- параметры фонового поиска соцсетей: число workers, timeout, число страниц сайта и проверка URL.
 
 API-ключи нельзя добавлять в Git.
 
@@ -256,7 +288,7 @@ Pull requests и сообщения об ошибках приветствуют
 
 ## English version
 
-YaBizTracker is a local Windows desktop application for discovering new organizations and contact information through the Yandex Maps API. It is intended for marketers and sales professionals: it stores organization discovery history, tracks new results, provides filters and CRM fields, displays organizations on a map and can extract publicly available e-mail addresses from organization websites.
+YaBizTracker 1.1.2 is a local Windows desktop application for discovering new organizations and contact information through the Yandex Maps API. It is intended for marketers and sales professionals: it stores organization discovery history, tracks new results, provides filters and CRM fields, displays organizations on a map and can extract publicly available e-mail addresses from organization websites.
 
 The application is designed for a single user on a local computer. Core data is stored in SQLite, scheduled searches run in the background, and no application backend server is required.
 
@@ -281,6 +313,21 @@ The application is designed for a single user on a local computer. Core data is 
 - SQLite backups and backup verification.
 - XLSX export with an independent fallback writer.
 - Diagnostics, rotating logs and crash reports.
+- Background social-network discovery from the public Yandex Maps organization page and the organization website.
+- Support for VK, Telegram, Max, Instagram, Odnoklassniki, Dzen, Rutube, YouTube, TikTok, Facebook, X/Twitter, Threads, Pinterest, LinkedIn, Viber, WhatsApp and Discord.
+- Validation of discovered social URLs; clearly unavailable 404/5xx links are discarded.
+- **Help → Manual social-network search** reprocesses all organizations in the local database.
+- Right-clicking the **Social networks** cell opens links grouped by platform.
+
+## Social-network discovery
+
+Since 1.1.2, social-network discovery is implemented as a separate background enrichment service. The official HTTP Organization Search API documents fields such as the organization website, phones and categories, but does not define social networks as a supported `CompanyMetaData` field. Yandex also warns that undocumented response fields are not a stable contract. YaBizTracker therefore does not rely on an undocumented `Links` field: it uses the organization ID to inspect the public Yandex Maps card and also checks the organization's website.
+
+The pipeline first applies strict URL validation: only exact supported social hosts are accepted, known service subdomains and internal routes are rejected, and each platform has profile/channel-specific rules. This prevents Yandex Maps and service URLs such as `yandexmaps`, `mapsyandex`, `rtrg`, `away.php`, `friends`, CDN/API hosts and static assets from entering `social_links`. URLs are then normalized, deduplicated and HTTP-validated; clearly unavailable 404/5xx URLs are discarded, while 401/403/405/429 responses are not treated as proof of an invalid link. Previously stored links are preserved when a temporary network error occurs.
+
+After a normal organization search, social discovery runs in the background. **Help → Manual social-network search** explicitly reprocesses all organizations in the local database. Right-clicking the **Social networks** cell opens platform-grouped links in the system browser.
+
+The `social_links` database field remains backward compatible: the legacy single-value dictionary format is accepted, while the current format supports multiple URLs per platform.
 
 ## Architecture
 
@@ -322,6 +369,8 @@ The application is designed for a single user on a local computer. Core data is 
 
 **The UI is split by responsibility.** `main_window.py` owns application orchestration; dialogs, delegates, widgets and workers live in dedicated modules.
 
+**Social enrichment is isolated from the UI.** `services/social_finder.py` extracts and strictly validates URLs, `ui/social_controller.py` manages background-scan lifecycle, `ui/social_worker.py` runs the scan in a separate Qt thread, and `ui/social_menu.py` only presents stored links.
+
 **Liveness is tracked per city and search category.** A global missing counter is unsafe because one organization can legitimately belong to several categories. `organization_category_observations` prevents deleting a lead simply because it disappeared from one query while remaining visible in another.
 
 **SQLite writes are transactional.** Organization upserts and category observations for a processed page are committed together. CRM changes, Trash operations, migrations and checkpoints use transactions as well.
@@ -339,7 +388,14 @@ The application is designed for a single user on a local computer. Core data is 
 │   ├── database/         # SQLite schema, migrations and persistence
 │   ├── domain/           # framework-independent business rules
 │   ├── services/         # application services
-│   └── ui/               # Qt windows, dialogs, widgets, delegates, workers
+│   │   ├── social_finder.py # extraction, normalization and validation of social URLs
+│   │   ├── email_finder.py  # website e-mail extraction
+│   │   ├── scan_service.py  # organization search and reconciliation
+│   │   └── map_controller.py # list/map synchronization
+│   └── ui/               # Qt windows, dialogs, widgets and workers
+│       ├── social_controller.py / social_worker.py
+│       ├── email_worker.py
+│       └── social_menu.py
 ├── tests/                # unit, integration and regression tests
 ├── main.py               # thin application entry point
 ├── YaBizTracker.spec     # PyInstaller build definition
@@ -393,7 +449,8 @@ On first launch, the application creates runtime configuration beside the execut
 - settlements;
 - included and excluded categories;
 - scan interval;
-- backup policy.
+- backup policy;
+- background social-discovery settings: worker count, timeout, website page limit and URL validation.
 
 API keys must never be committed to Git.
 

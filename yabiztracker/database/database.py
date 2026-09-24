@@ -129,6 +129,17 @@ class Database:
                     if cleaned != str(row[1] or ''):
                         self.conn.execute("UPDATE organizations SET email=? WHERE org_id=?", (cleaned, row[0]))
 
+            if v < 10:
+                cols = {r[1] for r in self.conn.execute("PRAGMA table_info(organizations)")}
+                for col, typ in [
+                    ("social_scan_status", "TEXT DEFAULT 'not_scanned'"),
+                    ("social_scanned_at", "TEXT DEFAULT ''"),
+                    ("social_scan_error", "TEXT DEFAULT ''"),
+                ]:
+                    if col not in cols:
+                        self.conn.execute(f"ALTER TABLE organizations ADD COLUMN {col} {typ}")
+                self.conn.execute("CREATE INDEX IF NOT EXISTS idx_org_social_scan_status ON organizations(social_scan_status)")
+
             if v < 7:
                 # Liveness is tracked per search category, not globally per organization.
                 # An organization can belong to multiple categories; a global miss counter
@@ -146,11 +157,6 @@ class Database:
                 CREATE INDEX IF NOT EXISTS idx_org_cat_obs_lookup
                   ON organization_category_observations(city_name, search_category, org_id);
                 """)
-            if v < 10:
-                # Social links are stored in the existing social_links JSON column;
-                # v10 adds no physical columns and only records the schema level.
-                pass
-
             self.conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
             self.conn.commit()
 
@@ -317,6 +323,77 @@ class Database:
     def get_by_id(self, oid):
         with self._lock: return self._row(self.conn.execute("SELECT * FROM organizations WHERE org_id=?", (oid,)).fetchone())
 
+    def get_social_scan_candidates(self, force=False, recheck_days=30):
+        cutoff = (datetime.now() - timedelta(days=max(1, int(recheck_days)))).isoformat(timespec="seconds")
+        with self._lock:
+            if force:
+                rows = self.conn.execute("SELECT * FROM organizations ORDER BY first_seen_date DESC").fetchall()
+            else:
+                rows = self.conn.execute(
+                    "SELECT * FROM organizations WHERE social_scan_status IS NULL OR social_scan_status IN ('not_scanned','error') OR social_scanned_at='' OR social_scanned_at<? ORDER BY first_seen_date DESC",
+                    (cutoff,),
+                ).fetchall()
+        return [self._row(r) for r in rows]
+
+    def mark_social_scan_queued(self, org_ids):
+        ids = [str(x) for x in org_ids if x]
+        if not ids:
+            return
+        with self._lock:
+            self.conn.executemany("UPDATE organizations SET social_scan_status='queued', social_scan_error='' WHERE org_id=?", [(x,) for x in ids])
+            self.conn.commit()
+
+    @staticmethod
+    def _social_json(value):
+        if isinstance(value, dict):
+            return value
+        try:
+            parsed = json.loads(value or "{}")
+            return parsed if isinstance(parsed, dict) else {}
+        except (TypeError, ValueError):
+            return {}
+
+    @classmethod
+    def _merge_social_json(cls, old_value, new_value):
+        result = {}
+        seen = set()
+        for source in (cls._social_json(old_value), cls._social_json(new_value)):
+            for platform, values in source.items():
+                if not isinstance(values, (list, tuple, set)):
+                    values = [values]
+                for value in values:
+                    url = str(value or "").strip()
+                    if not url or url in seen:
+                        continue
+                    seen.add(url)
+                    result.setdefault(str(platform), []).append(url)
+        return json.dumps(result, ensure_ascii=False, sort_keys=True)
+
+    def update_organization_socials(self, org_id, links, status, error=""):
+        oid = str(org_id or "").strip()
+        if not oid:
+            return False
+        now = datetime.now().isoformat(timespec="seconds")
+        with self._lock:
+            cur = self.conn.cursor()
+            cur.execute("BEGIN")
+            try:
+                row = cur.execute("SELECT social_links FROM organizations WHERE org_id=?", (oid,)).fetchone()
+                if not row:
+                    self.conn.rollback()
+                    return False
+                merged = self._merge_social_json(row[0], links or {})
+                old = str(row[0] or "{}")
+                if merged != old:
+                    cur.execute("UPDATE organizations SET social_links=?, last_updated=? WHERE org_id=?", (merged, now, oid))
+                    cur.execute("INSERT INTO organization_history(org_id,changed_at,field,old_value,new_value) VALUES(?,?,?,?,?)", (oid, now, "social_links", old, merged))
+                cur.execute("UPDATE organizations SET social_scan_status=?, social_scanned_at=?, social_scan_error=? WHERE org_id=?", (status or "not_found", now, str(error or ""), oid))
+                self.conn.commit()
+                return True
+            except Exception:
+                self.conn.rollback()
+                raise
+
     def update_crm(self, oid, **fields):
         return self.update_crm_many([oid], **fields) == 1
 
@@ -470,41 +547,6 @@ class Database:
                 self.conn.commit(); return True
             except Exception:
                 self.conn.rollback(); raise
-
-    def update_organization_social_links(self, org_id, discovered_links):
-        """Merge discovered social URLs into an organization without overwriting existing links."""
-        now = datetime.now().isoformat(timespec="seconds")
-        import json as _json
-        with self._lock:
-            row = self.conn.execute("SELECT social_links FROM organizations WHERE org_id=?", (str(org_id),)).fetchone()
-            if not row:
-                return False
-            try:
-                old_data = _json.loads(row[0] or "{}")
-            except Exception:
-                old_data = {}
-            if not isinstance(old_data, dict):
-                old_data = {}
-            merged = {}
-            for k, v in old_data.items():
-                vals = v if isinstance(v, list) else [v]
-                merged[k] = [str(x) for x in vals if str(x or "").strip()]
-            for k, vals in (discovered_links or {}).items():
-                if not isinstance(vals, list): vals = [vals]
-                target = merged.setdefault(str(k), [])
-                for url in vals:
-                    url = str(url or "").strip()
-                    if url and url not in target:
-                        target.append(url)
-            merged = {k: v for k, v in merged.items() if v}
-            new_value = _json.dumps(merged, ensure_ascii=False, sort_keys=True)
-            old_value = str(row[0] or "{}")
-            if old_value != new_value:
-                self.conn.execute("UPDATE organizations SET social_links=?, last_updated=? WHERE org_id=?", (new_value, now, str(org_id)))
-                self.conn.execute("INSERT INTO organization_history(org_id,changed_at,field,old_value,new_value) VALUES(?,?,?,?,?)", (str(org_id), now, "social_links", old_value, new_value))
-                self.conn.commit()
-                return True
-            return False
 
     def get_trash(self, filters=None):
         filters=filters or {}

@@ -104,10 +104,15 @@ function setMapState(cities,organizations,periodDays,fitViewport){
  if(fitViewport&&points.length)_stableSettlementFit(points);
 }
 function fitOnOrganizations(organizations){
- // Kept as a compatibility API, but organization selection must never
- // change the user's map viewport. Only marker styling is synchronized.
- const ids=(organizations||[]).map(o=>String(o.id));
- setSelectedMarkers(ids);
+ const valid=(Array.isArray(organizations)?organizations:[]).filter(o=>Number.isFinite(Number(o.latitude))&&Number.isFinite(Number(o.longitude)));
+ if(!valid.length)return;
+ setSelectedMarkers(valid.map(o=>String(o.id)));
+ const points=valid.map(o=>[Number(o.latitude),Number(o.longitude)]);
+ if(points.length===1){
+   myMap.setCenter(points[0],16,{duration:180,checkZoomRange:true});
+   return;
+ }
+ _fitPoints(points,12,18,80);
 }
 function applyPendingMapCities(){
  if(!myMap)return;
