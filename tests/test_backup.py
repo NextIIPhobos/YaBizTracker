@@ -21,6 +21,18 @@ class BackupTests(unittest.TestCase):
         restore_backup_to_path(backup,str(self.root/'organizations.db'))
         check=Database(str(self.root/'organizations.db')); self.assertEqual([tuple(r) for r in check.conn.execute("SELECT x FROM t").fetchall()],[('good',)]) ; check.close()
         self.assertTrue(any('.corrupt_' in x.name for x in self.root.iterdir()))
+    def test_prepare_database_migrates_legacy_default_backup_path_after_exe_move(self):
+        import json
+        old_install=self.root / "old_install"
+        old_install.mkdir()
+        (old_install / "YaBizTracker.exe").write_bytes(b"stub")
+        settings_path=self.root / "settings.json"
+        settings_path.write_text(json.dumps({"backup":{"path":str(old_install / "backups")}}),encoding="utf8")
+        ok,msg=prepare_database(str(self.root))
+        self.assertTrue(ok,msg)
+        saved=json.loads(settings_path.read_text(encoding="utf8"))
+        self.assertEqual(saved["backup"]["path"], "backups")
+
     def test_pre_migration_backup_is_created(self):
         self.db.close()
         conn=__import__('sqlite3').connect(str(self.root/'organizations.db')); conn.execute('PRAGMA user_version=3'); conn.commit(); conn.close()
@@ -58,8 +70,15 @@ class CleanupTests(unittest.TestCase):
                 open(os.path.join(d,name),"w").close()
             os.mkdir(os.path.join(d,"__pycache__"))
             open(os.path.join(d,"__pycache__","x.pyc"),"w").close()
-            removed=BackupService.delete_auxiliary_files(d)
+            os.mkdir(os.path.join(d,"logs"))
+            open(os.path.join(d,"logs","app.log.tmp"),"w").close()
+            custom=os.path.join(d,"custom_backups")
+            os.mkdir(custom)
+            open(os.path.join(custom,"leftover.tmp"),"w").close()
+            removed=BackupService.delete_auxiliary_files(d,(custom,))
             self.assertGreaterEqual(removed,2)
             self.assertTrue(os.path.exists(os.path.join(d,"organizations.db")))
             self.assertTrue(os.path.exists(os.path.join(d,"settings.json")))
             self.assertTrue(os.path.exists(os.path.join(d,"categories.txt")))
+            self.assertTrue(os.path.exists(os.path.join(d,"logs","app.log.tmp")))
+            self.assertTrue(os.path.exists(os.path.join(custom,"leftover.tmp")))

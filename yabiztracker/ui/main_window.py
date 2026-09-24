@@ -24,7 +24,7 @@ from ..services.export_service import ExportService
 from ..services.map_controller import MapController
 from ..services.category_catalog import sync_category_catalog
 from ..services.scan_service import ScanWorker
-from ..services.settings import load_json, save_json, migrate_settings
+from ..services.settings import load_json, save_json, migrate_settings, normalize_backup_path, resolve_backup_path
 from ..logger import AppLogger
 from .. import __version__
 from .workers import HealthWorker
@@ -44,14 +44,14 @@ class MainWindow(QMainWindow):
     def __init__(self,base_dir):
         super().__init__();self.base_dir=base_dir;ensure_categories_file(base_dir)
         self.config=load_json(os.path.join(base_dir,"config.json"))
-        self.settings=migrate_settings(load_json(os.path.join(base_dir,"settings.json")))
+        self.settings=normalize_backup_path(migrate_settings(load_json(os.path.join(base_dir,"settings.json"))), base_dir)
         quota_settings=self.settings.get("api_quota",{})
         self.usage=ApiUsageService(os.path.join(base_dir,"api_usage.json"), quota_settings.get("start_date"), quota_settings.get("reset_frequency","daily"))
         self.usage.set_limits(self.settings.get("api_limits",self.usage.snapshot()["limits"]))
         self.settings["api_limits"]=self.usage.snapshot()["limits"]
         self.db=Database(os.path.join(base_dir,"organizations.db"));self.db.purge_trash(days=30);self.api=YandexAPI(self.config.get("search_key",""),self.config.get("geocoder_key",""),self.usage)
         self.logger=AppLogger(base_dir);self.backup_service=self._build_backup_service();self.bridge=MapBridge();self.scan_worker=None;self.email_worker=None;self.health_worker=None;self.social_controller=SocialScanController(self);self.scheduler=None;self.map_ready=False;self.state=AppState.INITIALIZING;self._shutdown_started=False;self._updating_table=False;self._selection_from_marker=False;self._suppress_selection_fit=False;self.last_run_usage=None;self._active_orgs=[];self._org_by_id={}
-        self.quota_timer=QTimer(self);self.quota_timer.setSingleShot(True);self.scan_start_timer=QTimer(self);self.scan_start_timer.setSingleShot(True);self.scan_start_timer.timeout.connect(self._start_queued_scan);self.trash_cleanup_timer=QTimer(self);self.trash_cleanup_timer.setInterval(60*60*1000);self.trash_cleanup_timer.timeout.connect(self.cleanup_trash);self.trash_cleanup_timer.start()
+        self.quota_timer=QTimer(self);self.quota_timer.setSingleShot(True);self.trash_cleanup_timer=QTimer(self);self.trash_cleanup_timer.setInterval(60*60*1000);self.trash_cleanup_timer.timeout.connect(self.cleanup_trash);self.trash_cleanup_timer.start()
         self.setWindowTitle("YaBizTracker — мониторинг новых организаций");self.setWindowIcon(QApplication.instance().windowIcon());self.resize(1880,980);self.setMinimumSize(1200,700)
         self.build_ui()
         self.logger.log_message.connect(self.on_log_message)
@@ -63,25 +63,8 @@ class MainWindow(QMainWindow):
         if self.settings.get("cities") and self.settings.get("categories") and all(self.config.get(k) for k in ("js_api_key","geocoder_key","search_key")):
             self.set_state(AppState.READY);self.start_scheduler();self.run_health()
             if not bool(self.settings.get("initial_scan_completed",False)):
-                self._queue_scan_start(500)
+                QTimer.singleShot(500,lambda:self.run_scan(False))
         else:self.set_state(AppState.SETTINGS_REQUIRED);QTimer.singleShot(0,self.open_settings)
-    def _start_queued_scan(self):
-        if self._shutdown_started or self.state == AppState.SCANNING:
-            return
-        self.run_scan(False)
-    def _queue_scan_start(self, delay_ms=350):
-        """Schedule at most one automatic scan start.
-
-        Settings can be opened while the initial delayed scan is still queued.
-        Using one owned QTimer instead of QTimer.singleShot prevents the old
-        startup request and the post-settings request from both firing.
-        """
-        if self._shutdown_started:
-            return
-        self.scan_start_timer.stop()
-        self.scan_start_timer.start(max(0, int(delay_ms)))
-    def _cancel_queued_scan(self):
-        self.scan_start_timer.stop()
     def cleanup_trash(self):
         try:
             removed=self.db.purge_trash(days=30)
@@ -90,7 +73,7 @@ class MainWindow(QMainWindow):
             self.logger.log_general("WARNING",f"Не удалось очистить Корзину: {exc}")
     def _build_backup_service(self):
         cfg=self.settings.get("backup",{}) or {}; raw=str(cfg.get("path") or "backups")
-        path=raw if os.path.isabs(raw) else os.path.join(self.base_dir,raw)
+        path=resolve_backup_path(self.base_dir,raw)
         try:ret=int(cfg.get("retention",14))
         except (TypeError,ValueError):ret=14
         return BackupService(self.db,path,max(1,min(365,ret)))
@@ -389,7 +372,7 @@ class MainWindow(QMainWindow):
             return True
         self._shutdown_started = True
         self.set_state(AppState.STOPPING)
-        for timer in (getattr(self, "quota_timer", None), getattr(self, "scan_start_timer", None), getattr(self, "trash_cleanup_timer", None)):
+        for timer in (getattr(self, "quota_timer", None), getattr(self, "trash_cleanup_timer", None)):
             if timer is not None:
                 timer.stop()
         if self.scheduler:
@@ -998,21 +981,21 @@ class MainWindow(QMainWindow):
     def show_diagnostics(self):
         dlg=QDialog(self);dlg.setWindowTitle("Диагностика");dlg.resize(650,500);lay=QVBoxLayout(dlg);text=QPlainTextEdit();text.setReadOnly(True);text.setPlainText(self.diagnostics_text());lay.addWidget(text);bb=QDialogButtonBox(QDialogButtonBox.StandardButton.Close);save=bb.addButton("Сохранить отчёт",QDialogButtonBox.ButtonRole.ActionRole);save.clicked.connect(self.save_diagnostics);bb.rejected.connect(dlg.reject);lay.addWidget(bb);dlg.exec()
     def open_settings(self):
-        # A startup scan may still be waiting in the event queue. If the user
-        # opens Settings before it starts, it must not survive as a second scan
-        # request after "Save and search".
-        self._cancel_queued_scan()
         dlg=SettingsDialog(self,self.api,self.settings,self.config,self.usage,self.base_dir)
         if dlg.exec()!=QDialog.DialogCode.Accepted:return
-        self.settings.update(dlg.result_config);self.config.update(dlg.result_api_keys);self.settings["api_limits"]=self.usage.snapshot()["limits"];self.settings["api_quota"]=self.usage.snapshot().get("quota",{}) | {"start_date":dlg.result_config["api_quota"]["start_date"],"reset_frequency":dlg.result_config["api_quota"]["reset_frequency"]}
+        self.settings.update(dlg.result_config);normalize_backup_path(self.settings,self.base_dir);self.config.update(dlg.result_api_keys);self.settings["api_limits"]=self.usage.snapshot()["limits"];self.settings["api_quota"]=self.usage.snapshot().get("quota",{}) | {"start_date":dlg.result_config["api_quota"]["start_date"],"reset_frequency":dlg.result_config["api_quota"]["reset_frequency"]}
         try:
             moved=self.db.move_matching_to_trash(self.settings.get("excluded_categories",[]), None)
             if moved:self.logger.log_general("INFO",f"Исключено по категориям и перемещено в Корзину: {moved}")
         except Exception as exc:
             self.logger.log_general("WARNING",f"Не удалось применить категории-исключения к существующим организациям: {exc}")
-        self.settings.pop("next_scan_at",None)
+        # "Сохранить и искать" owns the immediate scan. The scheduler must not
+        # also fire an overdue persisted job at the same moment. Schedule the next
+        # automatic run strictly one interval in the future.
+        schedule_hours=max(1,int(self.settings.get("schedule_hours",6)))
+        self._persist_next_scan_at(self._now_msk()+timedelta(hours=schedule_hours))
         save_json(os.path.join(self.base_dir,"settings.json"),self.settings);save_json(os.path.join(self.base_dir,"config.json"),self.config)
         self.backup_service=self._build_backup_service();self.api=YandexAPI(self.config["search_key"],self.config["geocoder_key"],self.usage);self.map_ready=False;self.load_map_html()
         self.schedule_quota_reset_timer()
         self.set_state(AppState.READY);self.start_scheduler();self.run_health();self.refresh_all()
-        self._queue_scan_start(350)
+        QTimer.singleShot(350,lambda:self.run_scan(False))

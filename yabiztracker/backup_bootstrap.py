@@ -4,17 +4,25 @@ import os
 import sqlite3
 from .services.backup import BackupError, restore_backup_to_path, verify_sqlite_file, backup_sqlite_file, BACKUP_RE
 from .database.database import SCHEMA_VERSION
+from .services.settings import resolve_backup_path, normalize_backup_path, save_json
 
 
 def _backups(base_dir, settings):
     raw = (settings.get("backup", {}) or {}).get("path", "backups")
-    return os.path.abspath(raw if os.path.isabs(str(raw)) else os.path.join(base_dir, str(raw)))
+    return resolve_backup_path(base_dir, raw)
 
 
 def prepare_database(base_dir: str):
     db_path = os.path.join(base_dir, "organizations.db")
     from .services.settings import load_json, migrate_settings
-    settings = migrate_settings(load_json(os.path.join(base_dir, "settings.json")))
+    settings_path=os.path.join(base_dir, "settings.json")
+    settings = normalize_backup_path(migrate_settings(load_json(settings_path)), base_dir)
+    # Persist the migration so every subsequent component resolves the same
+    # current application-relative backup directory.
+    try:
+        save_json(settings_path, settings)
+    except Exception:
+        pass
     if not os.path.exists(db_path):
         return True, ""
     ok, detail = verify_sqlite_file(db_path)

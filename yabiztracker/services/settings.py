@@ -54,6 +54,35 @@ def _normalise_category_list(values):
     return result
 
 
+def normalize_backup_path(settings: dict, base_dir: str) -> dict:
+    """Keep the built-in backup folder relative to the current application directory."""
+    backup=settings.setdefault("backup", {})
+    raw=str(backup.get("path") or "backups").strip() or "backups"
+    normalized=os.path.normpath(os.path.expanduser(raw))
+    # Older releases persisted the default as an absolute <old-exe-dir>\backups.
+    # If the path is exactly a directory named ``backups``, treat it as the built-in
+    # location so moving the portable EXE also moves its default data location.
+    current_default=os.path.normcase(os.path.abspath(os.path.join(base_dir, "backups")))
+    candidate=os.path.normcase(os.path.abspath(normalized)) if os.path.isabs(normalized) else ""
+    if candidate and candidate == current_default:
+        backup["path"]="backups"
+    elif candidate and os.path.basename(normalized).lower() == "backups":
+        # Legacy settings wrote the built-in folder as an absolute path. If that
+        # old location contains the old portable executable, it is unambiguously
+        # an installation-relative default rather than an intentional custom path.
+        old_install=os.path.dirname(normalized)
+        old_exe=os.path.join(old_install, "YaBizTracker.exe")
+        backup["path"]="backups" if os.path.isfile(old_exe) else normalized
+    else:
+        backup["path"]=normalized
+    return settings
+
+def resolve_backup_path(base_dir: str, raw_path: str | None) -> str:
+    """Resolve a backup path against the current application directory."""
+    raw=str(raw_path or "backups").strip() or "backups"
+    normalized=os.path.normpath(os.path.expanduser(raw))
+    return normalized if os.path.isabs(normalized) else os.path.abspath(os.path.join(base_dir, normalized))
+
 def migrate_settings(s):
     s=dict(s or {})
     for k,v in DEFAULTS.items():s.setdefault(k,v.copy() if isinstance(v,dict) else list(v) if isinstance(v,list) else v)

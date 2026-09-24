@@ -19,6 +19,7 @@ from ..domain.models import STATUS_OPTIONS
 from ..services.backup import BackupService
 from ..services.export_service import ExportService
 from ..services.profiles import ProfileService
+from ..services.settings import resolve_backup_path
 from ..database import Database
 from .workers import SuggestWorker
 from .widgets import CityRow
@@ -110,8 +111,7 @@ class SettingsDialog(QDialog):
         bf.addRow("",self.backup_enabled)
         self.backup_retention=QSpinBox(); self.backup_retention.setRange(1,365); self.backup_retention.setValue(max(1,min(365,int(bcfg.get("retention",14)))))
         bf.addRow("Хранить копий:",self.backup_retention)
-        backup_path=str(bcfg.get("path") or "backups")
-        if not os.path.isabs(backup_path): backup_path=os.path.abspath(os.path.join(base_dir,backup_path))
+        backup_path=resolve_backup_path(base_dir, bcfg.get("path"))
         self.backup_path=QLineEdit(backup_path); self.backup_path.setMinimumHeight(30)
         browse=QPushButton("Выбрать…"); browse.clicked.connect(self.choose_backup_folder)
         roww=QWidget(); rowl=QHBoxLayout(roww); rowl.setContentsMargins(0,0,0,0); rowl.addWidget(self.backup_path,1); rowl.addWidget(browse)
@@ -301,7 +301,7 @@ class SettingsDialog(QDialog):
                                 "Удалить временные, восстановительные и __pycache__-файлы? База, настройки, категории и бэкапы не будут затронуты.",
                                 QMessageBox.StandardButton.Yes|QMessageBox.StandardButton.No) != QMessageBox.StandardButton.Yes:
             return
-        removed=BackupService.delete_auxiliary_files(self.base_dir)
+        removed=BackupService.delete_auxiliary_files(self.base_dir, (resolve_backup_path(self.base_dir, self.backup_path.text().strip()),))
         self.backup_status.setText(f"✓ Удалено вспомогательных файлов: {removed}")
 
     def open_backup_folder(self):
@@ -623,6 +623,9 @@ class SettingsDialog(QDialog):
         # correction afterwards so the value entered by the user is retained.
         self.usage.set_period_usage(consumed)
         backup_path=self.backup_path.text().strip() or os.path.join(self.base_dir,"backups")
+        default_backup=os.path.abspath(os.path.join(self.base_dir,"backups"))
+        if os.path.normcase(os.path.abspath(os.path.expanduser(backup_path))) == os.path.normcase(default_backup):
+            backup_path="backups"
         self.result_config={"cities":cities,"city":cities[0],"city_name":cities[0]["name"],"categories":cats,"excluded_categories":self.excluded_categories(),"period_days":int(self.period.currentData()),"schedule_hours":int(self.schedule.currentData()),"profiles":self.current.get("profiles",{}),"api_quota":{"start_date":quota_start,"reset_frequency":quota_frequency},"backup":{"enabled":self.backup_enabled.isChecked(),"retention":self.backup_retention.value(),"path":backup_path},"email_finder":{"enabled":self.email_finder_enabled.isChecked(),"workers":self.email_finder_workers.value(),"max_pages":self.email_finder_pages.value(),"timeout_seconds":self.email_finder_timeout.value(),"max_response_bytes":2097152,"recheck_days":self.email_finder_recheck.value(),"respect_robots":self.email_finder_robots.isChecked()}}
         self.result_api_keys=keys;self.accept()
 

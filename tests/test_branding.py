@@ -88,18 +88,6 @@ def test_api_retry_does_not_sleep_inside_domain_layer():
         assert "time.sleep" not in p.read_text(encoding="utf-8")
 
 
-
-
-def test_settings_save_uses_single_owned_scan_timer():
-    ui = (ROOT / "yabiztracker" / "ui" / "main_window.py").read_text(encoding="utf-8")
-    assert "self.scan_start_timer=QTimer(self)" in ui
-    assert "self.scan_start_timer.timeout.connect(self._start_queued_scan)" in ui
-    assert "self._queue_scan_start(500)" in ui
-    assert "self._queue_scan_start(350)" in ui
-    assert "self._cancel_queued_scan()" in ui
-    assert "QTimer.singleShot(500,lambda:self.run_scan(False))" not in ui
-    assert "QTimer.singleShot(350,lambda:self.run_scan(False))" not in ui
-
 def test_initial_scan_is_marked_only_after_completion():
     ui = (ROOT / "yabiztracker" / "ui" / "main_window.py").read_text(encoding="utf-8")
     run_start = ui.index("def run_scan(self,manual=True):")

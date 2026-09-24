@@ -1,7 +1,7 @@
-import tempfile, unittest, unittest.mock, json
+import tempfile, unittest, unittest.mock, json, os
 from pathlib import Path
 from yabiztracker.services.api_usage import ApiUsageService
-from yabiztracker.services.settings import migrate_settings
+from yabiztracker.services.settings import migrate_settings, normalize_backup_path, resolve_backup_path
 
 class UsageSettingsTests(unittest.TestCase):
     def test_periods_and_reset(self):
@@ -12,6 +12,25 @@ class UsageSettingsTests(unittest.TestCase):
             p=Path(d)/'usage.json'; p.write_text('{"quota":{"usage":"bad"},"limits":{"search":"bad"}}',encoding='utf8'); u=ApiUsageService(str(p)); s=u.snapshot(); self.assertEqual(s['limits']['search'],1000); self.assertEqual(s['period_usage']['search'],0)
     def test_settings_backup_defaults(self):
         s=migrate_settings({}); self.assertTrue(s['backup']['enabled']); self.assertEqual(s['backup']['retention'],14); self.assertEqual(s['backup']['path'],'backups')
+
+    def test_legacy_absolute_default_backup_path_follows_moved_application(self):
+        with tempfile.TemporaryDirectory() as d:
+            old_install=Path(d) / "old_install"
+            old_path=old_install / "backups"
+            new_base=Path(d) / "new_install"
+            old_install.mkdir()
+            (old_install / "YaBizTracker.exe").write_bytes(b"stub")
+            s=migrate_settings({"backup":{"path":str(old_path)}})
+            normalize_backup_path(s, str(new_base))
+            self.assertEqual(s["backup"]["path"], "backups")
+            self.assertEqual(resolve_backup_path(str(new_base), s["backup"]["path"]), str(new_base / "backups"))
+
+    def test_custom_absolute_backup_path_is_preserved(self):
+        with tempfile.TemporaryDirectory() as d:
+            custom=Path(d) / "my_backups"
+            s=migrate_settings({"backup":{"path":str(custom)}})
+            normalize_backup_path(s, str(Path(d) / "app"))
+            self.assertEqual(s["backup"]["path"], os.path.normpath(str(custom)))
 
 if __name__=='__main__': unittest.main()
 
@@ -100,6 +119,13 @@ class SchedulerPersistenceTests(unittest.TestCase):
         assert 'self._calculate_next_scan_at(now)' in text
         assert 'self.scheduler.add_job(self._scheduler_request,"date",run_date=next_scan' in text
         assert 'self._persist_next_scan_at(next_scan)' in text
+
+    def test_settings_save_schedules_next_automatic_run_in_future(self):
+        from pathlib import Path
+        text=Path(__file__).resolve().parents[1].joinpath("yabiztracker","ui","main_window.py").read_text(encoding="utf8")
+        assert 'schedule_hours=max(1,int(self.settings.get("schedule_hours",6)))' in text
+        assert 'self._persist_next_scan_at(self._now_msk()+timedelta(hours=schedule_hours))' in text
+        assert 'self.settings.pop("next_scan_at",None)' not in text
 
 
 class UsageWindowsPersistenceTests(unittest.TestCase):

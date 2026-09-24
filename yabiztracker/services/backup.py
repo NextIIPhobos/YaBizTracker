@@ -102,29 +102,80 @@ class BackupService:
         return removed
 
     @staticmethod
-    def delete_auxiliary_files(base_dir: str) -> int:
-        """Remove safe-to-regenerate application leftovers, never user data."""
+    def delete_auxiliary_files(base_dir: str, protected_dirs: list[str] | tuple[str, ...] = ()) -> int:
+        """Remove only application-generated temporary/recovery artifacts.
+
+        Database/configuration/categories, logs, backups and explicitly protected
+        directories are never traversed. This also makes cleanup safe when the
+        user configured a custom backup directory inside the application folder.
+        """
         import shutil
-        base = os.path.abspath(base_dir)
+
+        base = os.path.abspath(os.path.expanduser(base_dir))
+        if not os.path.isdir(base):
+            return 0
+
+        protected = set()
+        for raw in protected_dirs:
+            if raw:
+                protected.add(os.path.realpath(os.path.abspath(os.path.expanduser(str(raw)))))
+        # Built-in data directories are always protected.
+        protected.update({
+            os.path.realpath(os.path.join(base, "backups")),
+            os.path.realpath(os.path.join(base, "logs")),
+            os.path.realpath(os.path.join(base, ".git")),
+        })
+
+        def is_protected(path: str) -> bool:
+            real = os.path.realpath(path)
+            try:
+                return any(os.path.commonpath((real, item)) == item for item in protected)
+            except ValueError:
+                return False
+
         removed = 0
-        patterns = (".tmp", ".restore.tmp")
-        for root, dirs, files in os.walk(base):
-            # Never touch backups, the database, or user configuration/data.
-            dirs[:] = [d for d in dirs if d not in {"backups", ".git"}]
+        for root, dirs, files in os.walk(base, topdown=True, followlinks=False):
+            # Do not descend into protected directories or symlinked directories.
+            kept_dirs = []
+            for dirname in dirs:
+                path = os.path.join(root, dirname)
+                if dirname in {"backups", "logs", ".git"} or is_protected(path) or os.path.islink(path):
+                    continue
+                kept_dirs.append(dirname)
+            dirs[:] = kept_dirs
+
             for name in files:
                 path = os.path.join(root, name)
-                if name.endswith(patterns) or ".corrupt_" in name:
-                    try:
-                        os.remove(path); removed += 1
-                    except OSError:
-                        pass
-            for d in list(dirs):
-                if d == "__pycache__":
-                    path = os.path.join(root, d)
-                    try:
-                        shutil.rmtree(path); removed += 1
-                    except OSError:
-                        pass
+                # Only patterns produced by the application/build/runtime are
+                # eligible. Never delete arbitrary files merely because they are
+                # located in the application directory.
+                eligible = (
+                    name.endswith((".tmp", ".restore.tmp", ".pyc"))
+                    or ".corrupt_" in name
+                )
+                if not eligible or is_protected(path):
+                    continue
+                try:
+                    os.remove(path)
+                    removed += 1
+                except OSError:
+                    pass
+
+        # Remove now-empty __pycache__ directories left by the file pass.
+        for root, dirs, _ in os.walk(base, topdown=False, followlinks=False):
+            if is_protected(root):
+                continue
+            for dirname in dirs:
+                if dirname != "__pycache__":
+                    continue
+                path = os.path.join(root, dirname)
+                if is_protected(path) or os.path.islink(path):
+                    continue
+                try:
+                    shutil.rmtree(path)
+                    removed += 1
+                except OSError:
+                    pass
         return removed
 
     def restore(self, backup_path: str) -> None:
