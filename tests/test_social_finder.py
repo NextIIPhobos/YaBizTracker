@@ -211,3 +211,27 @@ def test_website_social_finder_legacy_html_api():
         "vk": ["https://vk.com/example"],
         "telegram": ["https://t.me/example"],
     }
+
+
+def test_website_social_finder_legacy_scan_signature_and_fetch(monkeypatch):
+    from yabiztracker.services.social_finder import WebsiteSocialFinder
+
+    finder = WebsiteSocialFinder(SocialFinderConfig(max_pages=2, respect_robots=False))
+    html = (
+        '<html><body>'
+        '<a href="https://vk.com/cat">VK</a>'
+        '<a href="https://max.ru/cat">MAX</a>'
+        '<a href="/contacts">Контакты</a>'
+        '</body></html>'
+    )
+    monkeypatch.setattr(finder, "_fetch", lambda url, robots: (html, url))
+    monkeypatch.setattr(finder, "_validate", lambda url: True)
+
+    result = finder.scan("1", "https://example.com")
+
+    assert result.org_id == "1"
+    assert result.status == "found"
+    assert result.links == {
+        "vk": ["https://vk.com/cat"],
+        "max": ["https://max.ru/cat"],
+    }

@@ -491,6 +491,38 @@ class WebsiteSocialFinder(SocialLinkFinder):
     def extract_social_links(self, html_text: str) -> dict[str, list[str]]:
         return self.extract_links_from_html(html_text)
 
+    def scan(self, org_or_id, website: str | None = None) -> SocialScanResult:
+        """Support both the current organization-dict API and the legacy API.
+
+        Current application code calls ``scan(org_dict)`` through
+        :class:`SocialLinkFinder`. Older integrations called
+        ``scan(org_id, website)`` on ``WebsiteSocialFinder``. Keeping both
+        forms here prevents CI/external integrations from breaking while all
+        links still use the same canonical validation path.
+        """
+        if isinstance(org_or_id, dict) and website is None:
+            return super().scan(org_or_id)
+        return self.scan_website(str(org_or_id or ""), str(website or ""))
+
+    def _legacy_fetch(self, url: str):
+        """Call legacy monkeypatched ``_fetch(url, robots)`` or current ``_fetch(url)``.
+
+        Older integrations supplied a robots-parser argument to ``_fetch``.
+        The current finder no longer needs that argument, but accepting the
+        old callable shape here keeps the compatibility adapter genuinely
+        backward-compatible without changing the current core API.
+        """
+        try:
+            return self._fetch(url, None)
+        except TypeError as exc:
+            # Only retry when the callable rejects the legacy arity. Do not
+            # turn arbitrary TypeErrors from the actual fetch into a second
+            # request.
+            message = str(exc).lower()
+            if "positional" not in message and "argument" not in message:
+                raise
+            return self._fetch(url)
+
     def scan_website(self, org_id: str, website: str) -> SocialScanResult:
         """Scan only the supplied website using the legacy API shape."""
         website = str(website or "").strip()
@@ -513,7 +545,7 @@ class WebsiteSocialFinder(SocialLinkFinder):
                 continue
             visited.add(page_url)
             try:
-                body, final_url = self._fetch(page_url)
+                body, final_url = self._legacy_fetch(page_url)
                 if not body:
                     continue
                 for platform, values in extract_social_links(body).items():
