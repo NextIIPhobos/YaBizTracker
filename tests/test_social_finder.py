@@ -196,3 +196,18 @@ def test_canonical_social_url_rejects_service_urls_but_keeps_real_profiles():
     assert canonical_social_url("https://t.me/ddx_fitness") == "https://t.me/ddx_fitness"
     assert canonical_social_url("https://vk.com/ddx_fitness") == "https://vk.com/ddx_fitness"
     assert canonical_social_url("https://ok.ru/ddx_fitness") == "https://ok.ru/ddx_fitness"
+
+
+def test_website_social_finder_legacy_html_api():
+    from yabiztracker.services.social_finder import WebsiteSocialFinder
+
+    finder = WebsiteSocialFinder(None, SocialFinderConfig(validate_links=True))
+    links = finder.extract_links_from_html(
+        '<a href="https://vk.com/example">VK</a>'
+        '<a href="https://t.me/example">Telegram</a>'
+        '<a href="https://vk.com/wall-123_1">bad</a>'
+    )
+    assert links == {
+        "vk": ["https://vk.com/example"],
+        "telegram": ["https://t.me/example"],
+    }

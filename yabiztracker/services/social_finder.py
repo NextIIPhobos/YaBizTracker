@@ -454,3 +454,22 @@ class SocialLinkFinder:
                 except Exception as exc:
                     org = futures[future]
                     on_result(SocialScanResult(str(org.get("org_id") or org.get("id") or ""), {}, "error", str(exc), []))
+
+
+class WebsiteSocialFinder(SocialLinkFinder):
+    """Backward-compatible website-only social-link extractor.
+
+    The application now uses ``SocialLinkFinder``. Older integrations and
+    tests can still use this name for extracting social links from HTML that
+    has already been fetched. Validation is deliberately delegated to the
+    canonical module-level extractor so both APIs use exactly the same rules.
+    """
+
+    def extract_links_from_html(self, html_text: str) -> dict[str, list[str]]:
+        return extract_social_links(html_text)
+
+    def _extract_links_from_html(self, html_text: str) -> dict[str, list[str]]:
+        return self.extract_links_from_html(html_text)
+
+    def extract_social_links(self, html_text: str) -> dict[str, list[str]]:
+        return self.extract_links_from_html(html_text)
